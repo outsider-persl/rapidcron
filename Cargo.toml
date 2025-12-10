@@ -1,0 +1,37 @@
+[package]
+name = "rapidcron"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# 异步运行时
+tokio = { version = "1.0", features = ["full"] }
+# 错误处理
+anyhow = "1.0"
+thiserror = "1.0"
+# 定时任务
+cron = "0.15"
+chrono = "0.4"
+# 分布式存储
+etcd-client = "0.12"
+mongodb = "2.0"
+# 消息队列
+lapin = { version = "2.0", features = ["native-tls"] }
+# gRPC
+tonic = "0.14"
+prost = "0.14"
+# 数据结构与算法
+dashmap = "5.0"
+petgraph = "0.6"
+# 监控与日志
+tracing = "0.1"
+tracing-subscriber = "0.3"
+prometheus = "0.13"
+# 配置
+lazy_static = "1.5.0"
+config = "0.13"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[build-dependencies]
+tonic-build = "0.10" # 用于生成gRPC代码

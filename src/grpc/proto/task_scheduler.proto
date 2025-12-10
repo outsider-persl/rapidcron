@@ -1,0 +1,143 @@
+syntax = "proto3";
+
+package rapidcron.task_scheduler;
+option java_package = "com.rapidcron.grpc";
+option java_outer_classname = "TaskSchedulerProto";
+option go_package = "./grpc;task_scheduler";
+
+// ========== 通用枚举 ==========
+enum TaskStatus {
+  TASK_STATUS_UNSPECIFIED = 0;
+  TASK_STATUS_PENDING = 1;     // 待执行
+  TASK_STATUS_RUNNING = 2;     // 执行中
+  TASK_STATUS_SUCCESS = 3;     // 执行成功
+  TASK_STATUS_FAILED = 4;      // 执行失败
+  TASK_STATUS_PAUSED = 5;      // 暂停
+}
+
+enum NodeType {
+  NODE_TYPE_UNSPECIFIED = 0;
+  NODE_TYPE_SCHEDULER = 1;     // 调度节点
+  NODE_TYPE_EXECUTOR = 2;      // 执行节点
+}
+
+// ========== 通用消息 ==========
+message CommonResponse {
+  int32 code = 1; // 0=成功，非0=错误码
+  string message = 2; // 提示信息
+}
+
+message PageRequest {
+  int32 page = 1 [default = 1];
+  int32 page_size = 2 [default = 20];
+}
+
+message PageResponse {
+  int64 total = 1;
+  int32 page = 2;
+  int32 page_size = 3;
+}
+
+// ========== 任务服务接口 ==========
+service TaskService {
+  // 创建任务
+  rpc CreateTask (CreateTaskRequest) returns (CreateTaskResponse);
+  // 查询任务列表
+  rpc QueryTaskList (QueryTaskListRequest) returns (QueryTaskListResponse);
+  // 获取任务下一次触发时间
+  rpc GetTaskNextTrigger (GetTaskNextTriggerRequest) returns (GetTaskNextTriggerResponse);
+  // 变更任务状态（暂停/启动）
+  rpc ChangeTaskStatus (ChangeTaskStatusRequest) returns (CommonResponse);
+}
+
+// 创建任务请求
+message CreateTaskRequest {
+  string task_name = 1; // 任务名称
+  string cron_expr = 2; // Cron表达式（6字段：秒 分 时 日 月 周）
+  string exec_node_id = 3; // 执行节点ID
+  string task_content = 4; // 任务内容（脚本/命令）
+  repeated string depend_task_ids = 5; // 依赖任务ID
+  int32 shard_count = 6 [default = 1]; // 分片数量
+}
+
+// 创建任务响应
+message CreateTaskResponse {
+  CommonResponse base = 1;
+  string task_id = 2; // 生成的任务ID
+}
+
+// 查询任务列表请求
+message QueryTaskListRequest {
+  string task_id = 1; // 可选，精确匹配
+  string task_name = 2; // 可选，模糊匹配
+  TaskStatus status = 3; // 可选，按状态筛选
+  PageRequest page = 4;
+}
+
+// 任务列表项
+message TaskItem {
+  string task_id = 1;
+  string task_name = 2;
+  string cron_expr = 3;
+  TaskStatus status = 4;
+  string exec_node_id = 5;
+  int64 create_time = 6; // 毫秒时间戳
+  int64 last_exec_time = 7; // 最后执行时间
+}
+
+// 查询任务列表响应
+message QueryTaskListResponse {
+  CommonResponse base = 1;
+  PageResponse page = 2;
+  repeated TaskItem tasks = 3;
+}
+
+// 获取任务下一次触发时间请求
+message GetTaskNextTriggerRequest {
+  string task_id = 1;
+  int32 count = 2 [default = 3]; // 获取N次触发时间，默认3
+}
+
+// 获取任务下一次触发时间响应
+message GetTaskNextTriggerResponse {
+  CommonResponse base = 1;
+  repeated int64 trigger_times = 2; // 毫秒时间戳列表
+}
+
+// 变更任务状态请求
+message ChangeTaskStatusRequest {
+  string task_id = 1;
+  TaskStatus target_status = 2; // 目标状态（仅支持PAUSED/PENDING）
+}
+
+// ========== 节点服务接口 ==========
+service NodeService {
+  // 查询节点状态
+  rpc QueryNodeStatus (QueryNodeStatusRequest) returns (QueryNodeStatusResponse);
+  // 下线节点
+  rpc OfflineNode (OfflineNodeRequest) returns (CommonResponse);
+}
+
+message QueryNodeStatusRequest {
+  NodeType node_type = 1; // 可选，按节点类型筛选
+}
+
+message NodeStatusItem {
+  string node_id = 1;
+  NodeType type = 2;
+  bool is_online = 3;
+  string ip = 4;
+  int32 port = 5;
+  string cpu_usage = 6; // 如"25%"
+  string mem_usage = 7; // 如"30%"
+}
+
+message QueryNodeStatusResponse {
+  CommonResponse base = 1;
+  repeated NodeStatusItem nodes = 2;
+}
+
+message OfflineNodeRequest {
+  string node_id = 1;
+  NodeType node_type = 2;
+}
