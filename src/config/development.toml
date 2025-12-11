@@ -1,0 +1,73 @@
+[server]
+bind_addr = "0.0.0.0:50051"
+enable_tls = false
+shutdown_grace_seconds = 10
+
+[logging]
+level = "debug"
+stdout = true
+file_path = "rapidcron.log"
+json = false
+
+[metrics]
+enabled = true
+bind_addr = "0.0.0.0:9000"
+path = "/metrics"
+# 指标收集间隔（秒）
+collection_interval = 10
+# 最大重启次数，0表示无限重启
+max_restarts = 5
+
+[scheduler]
+timezone = "Asia/Shanghai"
+max_concurrency = 64
+default_shard_count = 1
+
+[executor.retry]
+max_retries = 3
+backoff_seconds = 1
+backoff_multiplier = 2.0
+
+[executor.idempotent]
+enabled = true
+
+[storage.mongodb]
+uri = "mongodb://127.0.0.1:27017"
+database = "rapidcron"
+# 新增：连接池大小
+pool_size = 10
+
+[storage.etcd]
+endpoints = ["http://127.0.0.1:2379"]
+namespace = "rapidcron"
+lease_ttl_seconds = 15
+# 新增：连接超时（秒）
+connect_timeout = 5
+
+[messaging.rabbitmq]
+uri = "amqps://guest:guest@127.0.0.1:5671/%2f"
+queue = "rapidcron.tasks"
+prefetch = 50
+# 新增：心跳间隔（秒）
+heartbeat = 60
+
+[security]
+token_required = false
+allowed_alg = "HS256"
+public_key_path = ""
+# 新增：令牌过期时间（分钟）
+token_expiry_minutes = 60
+
+[grpc]
+enable_compression = true
+max_decoding_message_size = 4_194_304
+max_encoding_message_size = 10_485_760
+# 新增：保持连接时间（秒）
+keepalive_time = 300
+
+[features]
+enable_task_log_export = true
+# 新增：启用分布式追踪
+enable_tracing = false
+# 新增：启用性能分析
+enable_profiling = false

@@ -1,7 +1,7 @@
 pub mod scheduler;
 pub mod utils;
 pub mod common;
-mod grpc;
+pub mod grpc;
 
 pub fn add(left: u64, right: u64) -> u64 {
     left + right

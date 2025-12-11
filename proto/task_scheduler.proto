@@ -1,0 +1,99 @@
+syntax = "proto3";
+
+package task_scheduler;
+
+option go_package = "task_scheduler";
+option java_multiple_files = true;
+option java_package = "com.rapidcron.scheduler";
+
+// ---------------------------------------------
+// 基础通用结构
+// ---------------------------------------------
+
+// 任务状态
+enum TaskStatus {
+    TASK_UNKNOWN = 0;
+    TASK_PENDING = 1;      // 等待调度
+    TASK_RUNNING = 2;      // 正在运行
+    TASK_SUCCESS = 3;      // 执行成功
+    TASK_FAILED = 4;       // 执行失败
+    TASK_RETRYING = 5;     // 重试中
+    TASK_SKIPPED = 6;      // 条件不满足跳过
+}
+
+// 重试策略
+message RetryPolicy {
+    int32 max_retries = 1;          // 最大重试次数
+    int32 backoff_seconds = 2;      // 回退秒数
+    double backoff_multiplier = 3;  // 回退倍数
+}
+
+// 分片信息
+message Shard {
+    int32 shard_index = 1;          // 分片编号
+    int32 shard_total = 2;          // 总分片数量
+}
+
+// ---------------------------------------------
+// 任务注册 RegisterTask
+// ---------------------------------------------
+
+message RegisterTaskRequest {
+    string task_id = 1;             // 任务ID（唯一）
+    string name = 2;                // 任务名称
+    string cron_expr = 3;           // Cron表达式
+    map<string, string> params = 4; // 自定义参数
+    repeated string dependencies = 5; // 依赖任务ID（拓扑排序）
+    RetryPolicy retry_policy = 6;   // 重试策略
+    bool enable = 7;                // 是否启用任务
+}
+
+message RegisterTaskResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+// ---------------------------------------------
+// 执行任务 ExecuteTask
+// ---------------------------------------------
+
+message ExecuteTaskRequest {
+    string task_id = 1;
+    string request_id = 2;          // 幂等ID（防重复执行）
+    Shard shard = 3;                // 分片任务信息
+}
+
+message ExecuteTaskResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+// ---------------------------------------------
+// 查询任务 QueryTask
+// ---------------------------------------------
+
+message QueryTaskRequest {
+    string task_id = 1;
+}
+
+message QueryTaskResponse {
+    TaskStatus status = 1;
+    string last_run_time = 2;        // 上次执行时间
+    string next_run_time = 3;        // 下次执行时间
+    string message = 4;              // 额外信息
+}
+
+// ---------------------------------------------
+// gRPC 服务定义
+// ---------------------------------------------
+
+service Scheduler {
+    // 注册任务
+    rpc RegisterTask(RegisterTaskRequest) returns (RegisterTaskResponse);
+
+    // 触发任务执行
+    rpc ExecuteTask(ExecuteTaskRequest) returns (ExecuteTaskResponse);
+
+    // 查询任务状态
+    rpc QueryTask(QueryTaskRequest) returns (QueryTaskResponse);
+}
