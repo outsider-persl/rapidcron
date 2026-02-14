@@ -1,0 +1,35 @@
+[server]
+name = "rapidcron"
+host = "127.0.0.1"
+http_port = 8080
+grpc_port = 50051
+
+[logging]
+# info/debug/warn/error
+level = "info"
+# json/plain
+format = "plain"
+# stdout/file/both
+output = "both"
+log_file = "logs"
+
+[database]
+# MongoDB connection settings
+uri = "mongodb://localhost:27017"
+database_name = "rapidcron"
+username = "mongo"
+password = "mongo@12"
+
+[rabbitmq]
+host = "localhost"
+port = 5672
+username = "guest"
+password = "guest"
+
+[etcd]
+host = "localhost"
+port = 2379
+
+[metrics]
+enabled = true
+port = 9090

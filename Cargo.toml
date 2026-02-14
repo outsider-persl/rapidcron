@@ -1,0 +1,26 @@
+[package]
+name = "rapidcron"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+#async runtime
+tokio = { version = "1.0", features = ["full"] }
+
+# configuration
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "1.0"
+
+# time handling（本地时区）
+time = { version = "0.3", features = ["local-offset", "formatting"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter", "local-time"] }
+tracing-appender = "0.2"
+
+# error handling
+anyhow = "1.0"
+thiserror = "2.0"
