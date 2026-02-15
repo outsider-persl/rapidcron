@@ -1,145 +1,298 @@
-use chrono::{DateTime, Utc};
+#![allow(dead_code)]
+use chrono::{DateTime, Local};
+use mongodb::bson::{doc, oid::ObjectId, Bson};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use uuid::Uuid;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// 任务类型
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum TaskType {
+    Command,
+    Http,
+}
+
+/// 任务状态
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
 pub enum TaskStatus {
     Pending,
     Running,
-    Completed,
+    Success,
     Failed,
     Cancelled,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum CronExpression {
-    Once(DateTime<Utc>),
-    Interval { seconds: u64 },
-    Cron(String),
+/// 触发方式
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum TriggeredBy {
+    Scheduler,
+    Manual,
 }
 
+/// 任务载荷
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum TaskPayload {
+    Command {
+        command: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        timeout_seconds: Option<i32>,
+    },
+    Http {
+        url: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        method: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        headers: Option<serde_json::Value>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        body: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        timeout_seconds: Option<i32>,
+    },
+}
+
+impl TryFrom<TaskPayload> for Bson {
+    type Error = serde_json::Error;
+    
+    fn try_from(payload: TaskPayload) -> Result<Self, Self::Error> {
+        let value = serde_json::to_value(payload)?;
+        match Bson::try_from(value) {
+            Ok(bson) => Ok(bson),
+            Err(_) => Ok(Bson::Null),
+        }
+    }
+}
+
+/// 任务集合
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
-    pub id: String,
+    #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
+    pub id: Option<ObjectId>,
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    pub cron_expression: CronExpression,
-    pub command: String,
-    pub args: Vec<String>,
-    pub env: HashMap<String, String>,
-    pub timeout: Option<u64>,
-    pub max_retries: u32,
-    pub status: TaskStatus,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-    pub last_run: Option<DateTime<Utc>>,
-    pub next_run: Option<DateTime<Utc>>,
-    pub retry_count: u32,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub dependency_ids: Vec<ObjectId>,
+    #[serde(rename = "type")]
+    pub task_type: TaskType,
+    pub schedule: String,
+    pub enabled: bool,
+    pub payload: TaskPayload,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout_seconds: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_retries: Option<i32>,
+    pub created_at: DateTime<Local>,
+    pub updated_at: DateTime<Local>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<DateTime<Local>>,
 }
 
-impl Task {
-    pub fn new(
-        name: String,
-        cron_expression: CronExpression,
-        command: String,
-    ) -> Self {
-        let now = Utc::now();
-        Self {
-            id: Uuid::new_v4().to_string(),
-            name,
-            description: None,
-            cron_expression,
-            command,
-            args: Vec::new(),
-            env: HashMap::new(),
-            timeout: None,
-            max_retries: 3,
-            status: TaskStatus::Pending,
-            created_at: now,
-            updated_at: now,
-            last_run: None,
-            next_run: None,
-            retry_count: 0,
-        }
-    }
-
-    pub fn with_description(mut self, description: String) -> Self {
-        self.description = Some(description);
-        self
-    }
-
-    pub fn with_args(mut self, args: Vec<String>) -> Self {
-        self.args = args;
-        self
-    }
-
-    pub fn with_timeout(mut self, timeout: u64) -> Self {
-        self.timeout = Some(timeout);
-        self
-    }
-
-    pub fn with_env(mut self, env: HashMap<String, String>) -> Self {
-        self.env = env;
-        self
-    }
-}
-
+/// 执行结果
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TaskExecution {
-    pub id: String,
-    pub task_id: String,
-    pub started_at: DateTime<Utc>,
-    pub finished_at: Option<DateTime<Utc>>,
-    pub exit_code: Option<i32>,
-    pub stdout: Option<String>,
-    pub stderr: Option<String>,
+pub struct ExecutionResult {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
 }
 
-impl TaskExecution {
-    pub fn new(task_id: String) -> Self {
+/// 任务实例集合
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskInstance {
+    #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
+    pub id: Option<ObjectId>,
+    pub task_id: ObjectId,
+    pub scheduled_time: DateTime<Local>,
+    pub status: TaskStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub executor_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_time: Option<DateTime<Local>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_time: Option<DateTime<Local>>,
+    pub retry_count: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<ExecutionResult>,
+    pub created_at: DateTime<Local>,
+}
+
+/// 执行日志集合
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionLog {
+    #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
+    pub id: Option<ObjectId>,
+    pub task_id: ObjectId,
+    pub task_name: String,
+    pub instance_id: ObjectId,
+    pub scheduled_time: DateTime<Local>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_time: Option<DateTime<Local>>,
+    pub end_time: DateTime<Local>,
+    pub status: TaskStatus,
+    #[serde(rename = "duration_ms")]
+    pub duration_ms: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_summary: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_message: Option<String>,
+    #[serde(rename = "triggered_by")]
+    pub triggered_by: TriggeredBy,
+}
+
+/// 创建任务的请求
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateTaskRequest {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub dependency_ids: Vec<ObjectId>,
+    #[serde(rename = "type")]
+    pub task_type: TaskType,
+    pub schedule: String,
+    #[serde(default)]
+    pub enabled: bool,
+    pub payload: TaskPayload,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout_seconds: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_retries: Option<i32>,
+}
+
+/// 更新任务的请求
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateTaskRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dependency_ids: Option<Vec<ObjectId>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schedule: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payload: Option<TaskPayload>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout_seconds: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_retries: Option<i32>,
+}
+
+/// 任务查询过滤器
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskFilter {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_type: Option<TaskType>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted: Option<bool>,
+}
+
+/// 任务实例查询过滤器
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskInstanceFilter {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<ObjectId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<TaskStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub executor_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_after: Option<DateTime<Local>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_before: Option<DateTime<Local>>,
+}
+
+/// 执行日志查询过滤器
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionLogFilter {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<ObjectId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<TaskStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub triggered_by: Option<TriggeredBy>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_after: Option<DateTime<Local>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_before: Option<DateTime<Local>>,
+}
+
+// 为请求结构体实现 Default trait
+impl Default for CreateTaskRequest {
+    fn default() -> Self {
         Self {
-            id: Uuid::new_v4().to_string(),
-            task_id,
-            started_at: Utc::now(),
-            finished_at: None,
-            exit_code: None,
-            stdout: None,
-            stderr: None,
-            error: None,
+            name: String::new(),
+            description: None,
+            dependency_ids: Vec::new(),
+            task_type: TaskType::Command,
+            schedule: String::new(),
+            enabled: false,
+            payload: TaskPayload::Command {
+                command: String::new(),
+                timeout_seconds: None,
+            },
+            timeout_seconds: None,
+            max_retries: None,
         }
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NodeInfo {
-    pub id: String,
-    pub name: String,
-    pub address: String,
-    pub status: NodeStatus,
-    pub last_heartbeat: DateTime<Utc>,
-    pub task_capacity: u32,
-    pub current_tasks: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum NodeStatus {
-    Active,
-    Inactive,
-    Maintenance,
-}
-
-impl NodeInfo {
-    pub fn new(name: String, address: String, task_capacity: u32) -> Self {
+impl Default for UpdateTaskRequest {
+    fn default() -> Self {
         Self {
-            id: Uuid::new_v4().to_string(),
-            name,
-            address,
-            status: NodeStatus::Active,
-            last_heartbeat: Utc::now(),
-            task_capacity,
-            current_tasks: 0,
+            name: None,
+            description: None,
+            dependency_ids: None,
+            schedule: None,
+            enabled: None,
+            payload: None,
+            timeout_seconds: None,
+            max_retries: None,
+        }
+    }
+}
+
+impl Default for TaskFilter {
+    fn default() -> Self {
+        Self {
+            name: None,
+            enabled: None,
+            task_type: None,
+            deleted: Some(false), // 默认只查找未删除的任务
+        }
+    }
+}
+
+impl Default for TaskInstanceFilter {
+    fn default() -> Self {
+        Self {
+            task_id: None,
+            status: None,
+            executor_id: None,
+            start_after: None,
+            start_before: None,
+        }
+    }
+}
+
+impl Default for ExecutionLogFilter {
+    fn default() -> Self {
+        Self {
+            task_id: None,
+            status: None,
+            triggered_by: None,
+            end_after: None,
+            end_before: None,
         }
     }
 }

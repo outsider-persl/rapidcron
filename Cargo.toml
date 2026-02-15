@@ -7,12 +7,15 @@ edition = "2024"
 #async runtime
 tokio = { version = "1.0", features = ["full"] }
 
+# cron parsing
+cron = "0.15"
+
 # configuration
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "1.0"
 
-# time handling（本地时区）
+# time handling
 time = { version = "0.3", features = ["local-offset", "formatting"] }
 chrono = { version = "0.4", features = ["serde"] }
 
@@ -24,3 +27,17 @@ tracing-appender = "0.2"
 # error handling
 anyhow = "1.0"
 thiserror = "2.0"
+
+# mongodb
+mongodb = { version = "3.0" }
+bson = { version = "2.0", features = ["chrono-0_4"] }
+futures = "0.3"
+urlencoding = "2.1"
+
+# test dependencies
+uuid = { version = "1.0", features = ["v4"] }
+tokio-test = "0.4"
+
+[dev-dependencies]
+# 测试时需要的依赖
+rapidcron = { path = "." }
