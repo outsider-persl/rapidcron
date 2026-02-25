@@ -21,7 +21,11 @@ chrono = { version = "0.4", features = ["serde"] }
 
 # logging
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["json", "env-filter", "local-time"] }
+tracing-subscriber = { version = "0.3", features = [
+    "json",
+    "env-filter",
+    "local-time",
+] }
 tracing-appender = "0.2"
 
 # error handling
@@ -33,6 +37,13 @@ mongodb = { version = "3.0" }
 bson = { version = "2.0", features = ["chrono-0_4"] }
 futures = "0.3"
 urlencoding = "2.1"
+
+# etcd
+etcd-client = "0.14"
+
+# rabbitmq
+lapin = "2.5"
+amq-protocol-types = "7.0"
 
 # test dependencies
 uuid = { version = "1.0", features = ["v4"] }
