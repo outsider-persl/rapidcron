@@ -190,7 +190,11 @@ impl MongoDataSource {
 
     pub async fn get_last_dispatch_log(&self) -> Result<Option<DispatchLog>> {
         let collection = self.dispatch_logs();
-        let mut cursor = collection.find(doc! {}).await?;
+        let mut cursor = collection
+            .find(doc! {})
+            .sort(doc! { "scan_time": -1 })
+            .limit(1)
+            .await?;
         Ok(cursor.try_next().await?)
     }
 

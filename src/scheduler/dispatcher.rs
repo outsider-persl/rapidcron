@@ -51,9 +51,10 @@ impl Dispatcher {
             self.scan_interval
         );
 
-        // 从数据库读取上次扫描结束时间，避免重启时重复扫描
         let interval = self.scan_interval;
         let scan_interval_secs = interval.as_secs();
+
+        // 从数据库读取上次扫描结束时间，避免重启时重复扫描
         if let Ok(Some(last_log)) = self.db.get_last_dispatch_log().await {
             let mut last_end = self.last_scan_end_time.write().await;
             *last_end = last_log.scan_window_end;
@@ -62,6 +63,11 @@ impl Dispatcher {
                 "[Dispatcher] 从数据库恢复上次扫描结束时间: {}",
                 last_log.scan_window_end.format("%H:%M:%S")
             );
+        }
+
+        // 启动时做一次全局去重，与上次扫描时间无关
+        if let Err(e) = Self::check_and_dedup_instances(&self.db).await {
+            error!("[Dispatcher] 启动去重失败: {}", e);
         }
 
         let db = Arc::clone(&self.db);
@@ -78,14 +84,7 @@ impl Dispatcher {
             while *running_flag.read().await {
                 timer.tick().await;
 
-                match Self::scan_and_dispatch(
-                    &db,
-                    &task_queue,
-                    scan_interval_secs,
-                    &last_scan_end_time,
-                )
-                .await
-                {
+                match Self::scan_and_dispatch(&db, &task_queue, scan_interval_secs, &last_scan_end_time).await {
                     Ok(_) => {}
                     Err(e) => {
                         error!("[Dispatcher] 任务分发失败: {}", e);
@@ -261,6 +260,54 @@ impl Dispatcher {
         );
 
         Ok(dispatched_count)
+    }
+
+    /// 启动时对所有待执行实例做一次去重（无关上次扫描时间）
+    async fn check_and_dedup_instances(db: &Arc<MongoDataSource>) -> Result<()> {
+        let all_existing_instances = db
+            .find_task_instances(
+                Some(doc! {
+                    "status": "pending"
+                }),
+                None,
+            )
+            .await
+            .map_err(|e| Error::Database(format!("查询任务实例失败: {}", e)))?;
+
+        let mut existing_instances_map: std::collections::HashMap<
+            ObjectId,
+            std::collections::HashSet<i64>,
+        > = std::collections::HashMap::new();
+        let mut removed_count = 0u64;
+
+        for instance in all_existing_instances {
+            let scheduled_ts = instance.scheduled_time.timestamp();
+            let entry = existing_instances_map
+                .entry(instance.task_id)
+                .or_default();
+
+            if entry.contains(&scheduled_ts) {
+                if let Some(id) = instance.id {
+                    db.delete_task_instance(id)
+                        .await
+                        .map_err(|e| Error::Database(format!("删除重复任务实例失败: {}", e)))?;
+                    removed_count += 1;
+                }
+            } else {
+                entry.insert(scheduled_ts);
+            }
+        }
+
+        if removed_count > 0 {
+            info!(
+                "[Dispatcher] 启动去重完成，删除 {} 个重复的待执行任务实例",
+                removed_count
+            );
+        } else {
+            info!("[Dispatcher] 启动去重完成，未发现重复的待执行任务实例");
+        }
+
+        Ok(())
     }
 
     /// 为任务创建并分发实例
