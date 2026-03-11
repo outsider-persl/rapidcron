@@ -193,7 +193,6 @@ pub struct CreateTaskRequest {
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub dependency_ids: Vec<String>,
-    #[serde(rename = "type")]
     pub task_type: Option<String>,
     pub schedule: String,
     #[serde(default)]
@@ -256,7 +255,14 @@ impl CreateTaskRequest {
                 }
                 TaskType::Http
             }
+            Some("command") => {
+                if self.command.is_none() || self.command.as_ref().unwrap().is_empty() {
+                    return Err("命令任务必须提供命令".to_string());
+                }
+                TaskType::Command
+            }
             _ => {
+                // 默认为命令类型
                 if self.command.is_none() || self.command.as_ref().unwrap().is_empty() {
                     return Err("命令任务必须提供命令".to_string());
                 }

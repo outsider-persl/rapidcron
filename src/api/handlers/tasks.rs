@@ -123,33 +123,68 @@ pub async fn update_task(
 ) -> Result<Json<ApiResponse<Task>>, Error> {
     let object_id = parse_object_id(&id).map_err(Error::Validation)?;
 
-    let mut update = doc! { "updated_at": chrono::Utc::now() };
+    let mut update = doc! { "$set": { "updated_at": chrono::Utc::now() } };
 
     if let Some(name) = req.name {
-        update.insert("name", name);
+        update
+            .get_mut("$set")
+            .unwrap()
+            .as_document_mut()
+            .unwrap()
+            .insert("name", name);
     }
     if let Some(description) = req.description {
-        update.insert("description", description);
+        update
+            .get_mut("$set")
+            .unwrap()
+            .as_document_mut()
+            .unwrap()
+            .insert("description", description);
     }
     if let Some(schedule) = req.schedule {
         // 验证Cron表达式
         if let Err(e) = cron::Schedule::from_str(&schedule) {
             return Err(Error::Validation(format!("无效的Cron表达式: {}", e)));
         }
-        update.insert("schedule", schedule);
+        update
+            .get_mut("$set")
+            .unwrap()
+            .as_document_mut()
+            .unwrap()
+            .insert("schedule", schedule);
     }
     if let Some(enabled) = req.enabled {
-        update.insert("enabled", enabled);
+        update
+            .get_mut("$set")
+            .unwrap()
+            .as_document_mut()
+            .unwrap()
+            .insert("enabled", enabled);
     }
     if let Some(timeout_seconds) = req.timeout_seconds {
-        update.insert("timeout_seconds", timeout_seconds);
+        update
+            .get_mut("$set")
+            .unwrap()
+            .as_document_mut()
+            .unwrap()
+            .insert("timeout_seconds", timeout_seconds);
     }
     if let Some(max_retries) = req.max_retries {
-        update.insert("max_retries", max_retries);
+        update
+            .get_mut("$set")
+            .unwrap()
+            .as_document_mut()
+            .unwrap()
+            .insert("max_retries", max_retries);
     }
     if let Some(dependency_ids) = req.dependency_ids {
         let ids = parse_object_ids(&dependency_ids);
-        update.insert("dependency_ids", ids);
+        update
+            .get_mut("$set")
+            .unwrap()
+            .as_document_mut()
+            .unwrap()
+            .insert("dependency_ids", ids);
     }
 
     state.db.update_task(object_id, update).await?;
@@ -171,8 +206,10 @@ pub async fn delete_task(
     let object_id = parse_object_id(&id).map_err(Error::Validation)?;
 
     let update = doc! {
-        "deleted_at": chrono::Utc::now(),
-        "enabled": false
+        "$set": {
+            "deleted_at": chrono::Utc::now(),
+            "enabled": false
+        }
     };
 
     state.db.update_task(object_id, update).await?;
@@ -188,8 +225,10 @@ pub async fn enable_task(
     let object_id = parse_object_id(&id).map_err(Error::Validation)?;
 
     let update = doc! {
-        "enabled": true,
-        "updated_at": chrono::Utc::now()
+        "$set": {
+            "enabled": true,
+            "updated_at": chrono::Utc::now()
+        }
     };
 
     state.db.update_task(object_id, update).await?;
@@ -211,8 +250,10 @@ pub async fn disable_task(
     let object_id = parse_object_id(&id).map_err(Error::Validation)?;
 
     let update = doc! {
-        "enabled": false,
-        "updated_at": chrono::Utc::now()
+        "$set": {
+            "enabled": false,
+            "updated_at": chrono::Utc::now()
+        }
     };
 
     state.db.update_task(object_id, update).await?;
