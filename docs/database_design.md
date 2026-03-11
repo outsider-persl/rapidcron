@@ -63,3 +63,19 @@
 - `scheduled_time:1`（索引加速定时任务扫描）
 - `status:1,end_time:-1`（复合索引，优化状态查询）
 - `triggered_by:1,end_time:-1`（复合索引，优化触发方式查询）
+
+## dispatch_logs collection
+| 字段               | 类型     | 必填 | 说明               |
+| ------------------ | -------- | ---- | ------------------ |
+| `_id`              | ObjectId | ✅    | 主键               |
+| `task_id`          | ObjectId | ✅    | 关联 `tasks._id`   |
+| `task_name`        | string   | ✅    | 冗余任务名         |
+| `executor_id`      | string   | ✅    | 执行节点 ID        |
+| `scan_time`        | date     | ✅    | 扫描时间           |
+| `scheduled_time`   | date     | ✅    | 计划执行时间       |
+| `dispatched_count` | int      | ✅    | 分发的任务实例数量 |
+
+### indexes
+- `scan_time:-1`（索引加速扫描日志查询）
+- `task_id:1, scan_time:-1`（复合索引，优化任务分发历史查询）
+- `executor_id:1, scan_time:-1`（复合索引，优化执行节点分发历史查询）

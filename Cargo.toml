@@ -3,6 +3,14 @@ name = "rapidcron"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "simple-executor"
+path = "src/bin/simple-executor.rs"
+
+[[bin]]
+name = "rapidcron"
+path = "src/main.rs"
+
 [dependencies]
 #async runtime
 tokio = { version = "1.0", features = ["full"] }
@@ -45,9 +53,18 @@ etcd-client = "0.14"
 lapin = "2.5"
 amq-protocol-types = "7.0"
 
+# http server
+axum = "0.7"
+tower = "0.5"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+reqwest = { version = "0.12", features = ["json"] }
+
 # test dependencies
 uuid = { version = "1.0", features = ["v4"] }
 tokio-test = "0.4"
+
+# system monitoring
+sysinfo = "0.32"
 
 [dev-dependencies]
 # 测试时需要的依赖

@@ -1,0 +1,1009 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "RapidCron API",
+    "description": "分布式任务调度系统 API",
+    "version": "0.1.0",
+    "contact": {
+      "name": "RapidCron Team"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "本地开发服务器"
+    }
+  ],
+  "tags": [
+    {
+      "name": "统计",
+      "description": "统计信息相关接口"
+    },
+    {
+      "name": "任务管理",
+      "description": "任务管理相关接口"
+    },
+    {
+      "name": "任务实例",
+      "description": "任务实例相关接口"
+    },
+    {
+      "name": "集群管理",
+      "description": "集群管理相关接口"
+    }
+  ],
+  "paths": {
+    "/api/stats": {
+      "get": {
+        "tags": [
+          "统计"
+        ],
+        "summary": "获取统计信息",
+        "description": "获取系统统计信息，包括任务总数、实例总数等",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                },
+                "example": {
+                  "success": true,
+                  "data": {
+                    "total_tasks": 10,
+                    "enabled_tasks": 8,
+                    "total_instances": 100,
+                    "pending_instances": 5,
+                    "running_instances": 2,
+                    "success_instances": 90,
+                    "failed_instances": 3
+                  },
+                  "message": null
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks": {
+      "get": {
+        "tags": [
+          "任务管理"
+        ],
+        "summary": "获取任务列表",
+        "description": "分页获取任务列表，支持按启用状态筛选",
+        "parameters": [
+          {
+            "name": "enabled",
+            "in": "query",
+            "description": "是否只返回启用的任务",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "页码，默认为 1",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "每页数量，默认为 20",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedTaskResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "任务管理"
+        ],
+        "summary": "创建任务",
+        "description": "创建新的定时任务",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTaskRequest"
+              },
+              "example": {
+                "name": "test-task",
+                "description": "测试任务",
+                "schedule": "0/5 * * * * *",
+                "task_type": "command",
+                "command": "echo 'Hello World'",
+                "enabled": true,
+                "timeout_seconds": 30,
+                "max_retries": 3,
+                "dependency_ids": []
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "创建成功",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskResponse"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}": {
+      "get": {
+        "tags": [
+          "任务管理"
+        ],
+        "summary": "获取任务详情",
+        "description": "根据任务 ID 获取任务详细信息",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "任务 ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "任务不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                },
+                "example": {
+                  "success": false,
+                  "data": null,
+                  "message": "任务不存在"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "任务管理"
+        ],
+        "summary": "更新任务",
+        "description": "更新任务信息",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "任务 ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateTaskRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "更新成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "任务管理"
+        ],
+        "summary": "删除任务",
+        "description": "软删除任务（设置 deleted_at 字段）",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "任务 ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "删除成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                },
+                "example": {
+                  "success": true,
+                  "data": null,
+                  "message": "任务删除成功"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}/enable": {
+      "post": {
+        "tags": [
+          "任务管理"
+        ],
+        "summary": "启用任务",
+        "description": "启用指定的任务",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "任务 ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "启用成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                },
+                "example": {
+                  "success": true,
+                  "data": null,
+                  "message": "任务启用成功"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}/disable": {
+      "post": {
+        "tags": [
+          "任务管理"
+        ],
+        "summary": "禁用任务",
+        "description": "禁用指定的任务",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "任务 ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "禁用成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                },
+                "example": {
+                  "success": true,
+                  "data": null,
+                  "message": "任务禁用成功"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}/trigger": {
+      "post": {
+        "tags": [
+          "任务管理"
+        ],
+        "summary": "手动触发任务",
+        "description": "手动触发任务执行，创建任务实例",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "任务 ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TriggerTaskRequest"
+              },
+              "example": {
+                "scheduled_time": null
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "触发成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskInstanceResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances": {
+      "get": {
+        "tags": [
+          "任务实例"
+        ],
+        "summary": "获取任务实例列表",
+        "description": "分页获取任务实例列表，支持按任务 ID 和状态筛选",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "query",
+            "description": "任务 ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "任务状态 (pending/running/success/failed/cancelled)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "running",
+                "success",
+                "failed",
+                "cancelled"
+              ]
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "页码，默认为 1",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "每页数量，默认为 20",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedInstanceResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}": {
+      "get": {
+        "tags": [
+          "任务实例"
+        ],
+        "summary": "获取任务实例详情",
+        "description": "根据实例 ID 获取任务实例详细信息",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "实例 ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskInstanceResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "实例不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                },
+                "example": {
+                  "success": false,
+                  "data": null,
+                  "message": "任务实例不存在"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/clusters": {
+      "get": {
+        "tags": [
+          "集群管理"
+        ],
+        "summary": "获取集群信息",
+        "description": "获取所有集群节点信息，包括节点名称、状态、CPU、内存和活跃任务数",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClusterResponse"
+                },
+                "example": {
+                  "success": true,
+                  "data": {
+                    "nodes": [
+                      {
+                        "node_name": "executor-1",
+                        "node_id": "executor-1",
+                        "host": "localhost",
+                        "port": 8081,
+                        "status": "active",
+                        "cpu_usage": 45.5,
+                        "memory_usage": 2.3,
+                        "memory_total": 8,
+                        "active_tasks": 3,
+                        "metadata": "executor"
+                      },
+                      {
+                        "node_name": "executor-2",
+                        "node_id": "executor-2",
+                        "host": "localhost",
+                        "port": 8082,
+                        "status": "active",
+                        "cpu_usage": 30.2,
+                        "memory_usage": 1.8,
+                        "memory_total": 8,
+                        "active_tasks": 1,
+                        "metadata": "executor"
+                      }
+                    ],
+                    "total_nodes": 2,
+                    "active_nodes": 2
+                  },
+                  "message": null
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ApiResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "description": "请求是否成功"
+          },
+          "data": {
+            "type": "object",
+            "nullable": true,
+            "description": "响应数据"
+          },
+          "message": {
+            "type": "string",
+            "nullable": true,
+            "description": "错误消息（仅在失败时）"
+          }
+        }
+      },
+      "Task": {
+        "type": "object",
+        "properties": {
+          "_id": {
+            "type": "string",
+            "description": "任务 ID"
+          },
+          "name": {
+            "type": "string",
+            "description": "任务名称"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true,
+            "description": "任务描述"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "command",
+              "http"
+            ],
+            "description": "任务类型"
+          },
+          "schedule": {
+            "type": "string",
+            "description": "Cron 表达式（6 字段：秒 分 时 日 月 周）"
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "是否启用"
+          },
+          "payload": {
+            "type": "object",
+            "description": "任务载荷"
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "nullable": true,
+            "description": "超时时间（秒）"
+          },
+          "max_retries": {
+            "type": "integer",
+            "nullable": true,
+            "description": "最大重试次数"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "创建时间"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "更新时间"
+          }
+        }
+      },
+      "TaskInstance": {
+        "type": "object",
+        "properties": {
+          "_id": {
+            "type": "string",
+            "description": "实例 ID"
+          },
+          "task_id": {
+            "type": "string",
+            "description": "任务 ID"
+          },
+          "scheduled_time": {
+            "type": "string",
+            "format": "date-time",
+            "description": "计划执行时间"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "success",
+              "failed",
+              "cancelled"
+            ],
+            "description": "实例状态"
+          },
+          "executor_id": {
+            "type": "string",
+            "nullable": true,
+            "description": "执行器 ID"
+          },
+          "start_time": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "开始执行时间"
+          },
+          "end_time": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "结束执行时间"
+          },
+          "retry_count": {
+            "type": "integer",
+            "description": "重试次数"
+          },
+          "result": {
+            "type": "object",
+            "nullable": true,
+            "description": "执行结果"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "创建时间"
+          }
+        }
+      },
+      "CreateTaskRequest": {
+        "type": "object",
+        "required": [
+          "name",
+          "schedule"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "任务名称"
+          },
+          "description": {
+            "type": "string",
+            "description": "任务描述"
+          },
+          "schedule": {
+            "type": "string",
+            "description": "Cron 表达式（6 字段：秒 分 时 日 月 周）"
+          },
+          "task_type": {
+            "type": "string",
+            "enum": [
+              "command",
+              "http"
+            ],
+            "description": "任务类型"
+          },
+          "command": {
+            "type": "string",
+            "description": "命令（当 task_type 为 command 时使用）"
+          },
+          "url": {
+            "type": "string",
+            "description": "URL（当 task_type 为 http 时使用）"
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "是否启用"
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "description": "超时时间（秒）"
+          },
+          "max_retries": {
+            "type": "integer",
+            "description": "最大重试次数"
+          },
+          "dependency_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "依赖任务 ID 列表"
+          }
+        }
+      },
+      "UpdateTaskRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "任务名称"
+          },
+          "description": {
+            "type": "string",
+            "description": "任务描述"
+          },
+          "schedule": {
+            "type": "string",
+            "description": "Cron 表达式（6 字段：秒 分 时 日 月 周）"
+          },
+          "task_type": {
+            "type": "string",
+            "enum": [
+              "command",
+              "http"
+            ],
+            "description": "任务类型"
+          },
+          "command": {
+            "type": "string",
+            "description": "命令（当 task_type 为 command 时使用）"
+          },
+          "url": {
+            "type": "string",
+            "description": "URL（当 task_type 为 http 时使用）"
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "是否启用"
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "description": "超时时间（秒）"
+          },
+          "max_retries": {
+            "type": "integer",
+            "description": "最大重试次数"
+          },
+          "dependency_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "依赖任务 ID 列表"
+          }
+        }
+      },
+      "TriggerTaskRequest": {
+        "type": "object",
+        "properties": {
+          "scheduled_time": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true,
+            "description": "计划执行时间（Unix 时间戳），为空则立即执行"
+          }
+        }
+      },
+      "PaginatedResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "description": "数据列表"
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "总数"
+          },
+          "page": {
+            "type": "integer",
+            "description": "当前页码"
+          },
+          "page_size": {
+            "type": "integer",
+            "description": "每页数量"
+          },
+          "total_pages": {
+            "type": "integer",
+            "description": "总页数"
+          }
+        }
+      },
+      "TaskResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ApiResponse"
+          }
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Task"
+          }
+        }
+      },
+      "TaskInstanceResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ApiResponse"
+          }
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TaskInstance"
+          }
+        }
+      },
+      "PaginatedTaskResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ApiResponse"
+          }
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PaginatedResponse"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Task"
+                }
+              }
+            }
+          }
+        }
+      },
+      "PaginatedInstanceResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ApiResponse"
+          }
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PaginatedResponse"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/TaskInstance"
+                }
+              }
+            }
+          }
+        }
+      },
+      "ClusterNode": {
+        "type": "object",
+        "properties": {
+          "node_name": {
+            "type": "string",
+            "description": "节点名称"
+          },
+          "node_id": {
+            "type": "string",
+            "description": "节点 ID"
+          },
+          "host": {
+            "type": "string",
+            "description": "主机地址"
+          },
+          "port": {
+            "type": "integer",
+            "description": "端口号"
+          },
+          "status": {
+            "type": "string",
+            "description": "节点状态（active/inactive）"
+          },
+          "cpu_usage": {
+            "type": "number",
+            "format": "double",
+            "description": "CPU 使用率（百分比）"
+          },
+          "memory_usage": {
+            "type": "number",
+            "format": "double",
+            "description": "内存使用量（GB）"
+          },
+          "memory_total": {
+            "type": "integer",
+            "description": "内存总量（GB）"
+          },
+          "active_tasks": {
+            "type": "integer",
+            "format": "int64",
+            "description": "活跃任务数"
+          },
+          "metadata": {
+            "type": "string",
+            "nullable": true,
+            "description": "元数据"
+          }
+        }
+      },
+      "ClusterResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ApiResponse"
+          }
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "nodes": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ClusterNode"
+                }
+              },
+              "total_nodes": {
+                "type": "integer",
+                "format": "int64",
+                "description": "总节点数"
+              },
+              "active_nodes": {
+                "type": "integer",
+                "format": "int64",
+                "description": "活跃节点数"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

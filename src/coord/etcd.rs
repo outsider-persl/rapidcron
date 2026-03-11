@@ -1,7 +1,10 @@
 use crate::error::{Error, Result};
-use etcd_client::Client;
-use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use etcd_client::{Client, GetOptions, PutOptions};
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::{Mutex, RwLock};
+use tokio::task::JoinHandle;
+use tracing::{debug, error, info, warn};
 
 /// 服务注册信息
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -11,119 +14,200 @@ pub struct ServiceInfo {
     pub host: String,
     pub port: u16,
     pub metadata: Option<String>,
+    pub started_at: i64,
+    pub last_heartbeat: i64,
 }
 
 /// 服务注册和发现
 pub struct ServiceRegistry {
-    client: Client,
+    client: Arc<Mutex<Client>>,
     service_prefix: String,
-    registered_services: RwLock<Vec<ServiceInfo>>,
+    service_leases: RwLock<HashMap<String, i64>>,
+    keepalive_tasks: RwLock<HashMap<String, JoinHandle<()>>>,
 }
 
 impl ServiceRegistry {
     /// 创建新的服务注册器
     pub fn new(client: Client, service_prefix: String) -> Self {
         Self {
-            client,
+            client: Arc::new(Mutex::new(client)),
             service_prefix,
-            registered_services: RwLock::new(Vec::new()),
+            service_leases: RwLock::new(HashMap::new()),
+            keepalive_tasks: RwLock::new(HashMap::new()),
         }
     }
 
     /// 注册服务
-    pub async fn register(&mut self, service: ServiceInfo) -> Result<()> {
+    pub async fn register(&self, service: ServiceInfo, lease_ttl_secs: i64) -> Result<i64> {
         let key = format!("{}/{}", self.service_prefix, service.service_name);
 
         let value = serde_json::to_string(&service).map_err(|e| Error::Serialization(e))?;
 
+        let lease = self
+            .client
+            .lock()
+            .await
+            .lease_grant(lease_ttl_secs, None)
+            .await
+            .map_err(|e| Error::Etcd(format!("创建 Lease 失败: {}", e)))?;
+
+        let lease_id = lease.id();
+
+        let options = PutOptions::new().with_lease(lease_id);
+
         self.client
-            .put(key.clone(), value, None)
+            .lock()
+            .await
+            .put(key.clone(), value, Some(options))
             .await
             .map_err(|e| Error::Etcd(format!("注册服务失败: {}", e)))?;
 
-        let mut services = self.registered_services.write().await;
-        services.push(service.clone());
-        drop(services);
+        let mut leases = self.service_leases.write().await;
+        leases.insert(service.service_name.clone(), lease_id);
+        drop(leases);
 
         info!(
-            "成功注册服务: {} ({})",
-            service.service_name, service.service_id
+            "服务注册成功: {} ({}) - Lease: {}",
+            service.service_name, service.service_id, lease_id
         );
 
-        Ok(())
+        self.start_keepalive(service.service_name.clone(), lease_id, lease_ttl_secs)
+            .await;
+
+        Ok(lease_id)
+    }
+
+    /// 启动 KeepAlive 任务
+    async fn start_keepalive(&self, service_name: String, lease_id: i64, ttl_secs: i64) {
+        let client = Arc::clone(&self.client);
+        let keepalive_interval = std::time::Duration::from_secs((ttl_secs / 3).max(1) as u64);
+        let service_name_clone = service_name.clone();
+        let service_prefix = self.service_prefix.clone();
+
+        let task = tokio::spawn(async move {
+            let (mut keeper, mut stream) = {
+                let mut client = client.lock().await;
+                match client.lease_keep_alive(lease_id).await {
+                    Ok(result) => result,
+                    Err(e) => {
+                        error!(
+                            "启动 KeepAlive 失败 (服务: {}, Lease: {}): {}",
+                            service_name_clone, lease_id, e
+                        );
+                        return;
+                    }
+                }
+            };
+
+            let mut ticker = tokio::time::interval(keepalive_interval);
+
+            loop {
+                ticker.tick().await;
+
+                if let Err(e) = keeper.keep_alive().await {
+                    error!(
+                        "KeepAlive 失败 (服务: {}, Lease: {}): {}",
+                        service_name_clone, lease_id, e
+                    );
+                    break;
+                }
+
+                match stream.message().await {
+                    Ok(Some(resp)) => {
+                        debug!(
+                            "心跳发送成功 (服务: {}, Lease: {}), TTL: {}s",
+                            service_name_clone,
+                            lease_id,
+                            resp.ttl()
+                        );
+
+                        let key = format!("{}/{}", service_prefix, service_name_clone);
+                        let mut client = client.lock().await;
+
+                        let get_result = client.get(key.clone(), None).await;
+                        if let Ok(get_resp) = get_result {
+                            if let Some(kv) = get_resp.kvs().first() {
+                                if let Ok(mut service_info) =
+                                    serde_json::from_slice::<ServiceInfo>(kv.value())
+                                {
+                                    service_info.last_heartbeat = chrono::Utc::now().timestamp();
+                                    if let Ok(value) = serde_json::to_string(&service_info) {
+                                        let options = PutOptions::new().with_lease(lease_id);
+                                        let _ = client.put(key, value, Some(options)).await;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        error!(
+                            "KeepAlive 流已关闭 (服务: {}, Lease: {}), 服务可能被剔除",
+                            service_name_clone, lease_id
+                        );
+                        break;
+                    }
+                    Err(e) => {
+                        error!(
+                            "KeepAlive 响应读取失败 (服务: {}, Lease: {}): {}",
+                            service_name_clone, lease_id, e
+                        );
+                        break;
+                    }
+                }
+            }
+        });
+
+        let mut tasks = self.keepalive_tasks.write().await;
+        tasks.insert(service_name, task);
     }
 
     /// 注销服务
-    pub async fn deregister(&mut self, service_name: &str) -> Result<()> {
+    pub async fn deregister(&self, service_name: &str) -> Result<()> {
         let key = format!("{}/{}", self.service_prefix, service_name);
 
+        let leases = self.service_leases.read().await;
+        let lease_id = leases.get(service_name).copied();
+        drop(leases);
+
+        if let Some(lease_id) = lease_id {
+            self.client
+                .lock()
+                .await
+                .lease_revoke(lease_id)
+                .await
+                .map_err(|e| Error::Etcd(format!("撤销 Lease 失败: {}", e)))?;
+
+            info!("Lease 已撤销: {} (Lease: {})", service_name, lease_id);
+        }
+
         self.client
+            .lock()
+            .await
             .delete(key.clone(), None)
             .await
             .map_err(|e| Error::Etcd(format!("注销服务失败: {}", e)))?;
 
-        let mut services = self.registered_services.write().await;
-        services.retain(|s| s.service_name != service_name);
-        drop(services);
+        let mut leases = self.service_leases.write().await;
+        leases.remove(service_name);
+        drop(leases);
 
-        info!("成功注销服务: {}", service_name);
+        let mut tasks = self.keepalive_tasks.write().await;
+        if let Some(task) = tasks.remove(service_name) {
+            task.abort();
+            info!("KeepAlive 任务已停止: {}", service_name);
+        }
+        drop(tasks);
+
+        info!("服务注销成功: {}", service_name);
 
         Ok(())
-    }
-
-    /// 发现服务
-    pub async fn discover(&mut self, service_name: &str) -> Result<Vec<ServiceInfo>> {
-        let key = format!("{}/{}", self.service_prefix, service_name);
-
-        let response = self
-            .client
-            .get(key.clone(), None)
-            .await
-            .map_err(|e| Error::Etcd(format!("发现服务失败: {}", e)))?;
-
-        if response.kvs().is_empty() {
-            warn!("未找到服务: {}", service_name);
-            return Ok(Vec::new());
-        }
-
-        let mut services = Vec::new();
-        for kv in response.kvs() {
-            if let Ok(service) = serde_json::from_slice::<ServiceInfo>(kv.value()) {
-                services.push(service);
-            }
-        }
-
-        debug!("发现服务 {}: {} 个实例", service_name, services.len());
-
-        Ok(services)
-    }
-
-    /// 刷新服务注册（心跳）
-    pub async fn refresh(&mut self, service: &ServiceInfo) -> Result<()> {
-        let key = format!("{}/{}", self.service_prefix, service.service_name);
-
-        let value = serde_json::to_string(service).map_err(|e| Error::Serialization(e))?;
-
-        self.client
-            .put(key.clone(), value, None)
-            .await
-            .map_err(|e| Error::Etcd(format!("刷新服务失败: {}", e)))?;
-
-        debug!("刷新服务注册: {}", service.service_name);
-
-        Ok(())
-    }
-
-    /// 获取所有已注册的服务
-    pub async fn get_registered_services(&self) -> Vec<ServiceInfo> {
-        self.registered_services.read().await.clone()
     }
 }
 
 /// etcd 客户端管理器
 pub struct EtcdManager {
-    client: Client,
-    registry: ServiceRegistry,
+    client: Arc<Mutex<Client>>,
+    registry: RwLock<ServiceRegistry>,
 }
 
 impl EtcdManager {
@@ -135,23 +219,60 @@ impl EtcdManager {
 
         let registry = ServiceRegistry::new(client.clone(), "rapidcron/services".to_string());
 
-        info!("成功连接到 etcd");
+        info!("etcd 连接成功");
 
-        Ok(Self { client, registry })
+        Ok(Self {
+            client: Arc::new(Mutex::new(client)),
+            registry: RwLock::new(registry),
+        })
+    }
+
+    /// 创建新的 etcd 管理器（指定前缀）
+    pub async fn new_with_prefix(endpoints: Vec<String>, service_prefix: String) -> Result<Self> {
+        let client = Client::connect(endpoints, None)
+            .await
+            .map_err(|e| Error::Etcd(format!("连接 etcd 失败: {}", e)))?;
+
+        let registry = ServiceRegistry::new(client.clone(), service_prefix);
+
+        info!("etcd 连接成功");
+
+        Ok(Self {
+            client: Arc::new(Mutex::new(client)),
+            registry: RwLock::new(registry),
+        })
     }
 
     /// 获取服务注册器
-    pub fn registry(&mut self) -> &mut ServiceRegistry {
-        &mut self.registry
+    pub async fn registry(&self) -> tokio::sync::RwLockWriteGuard<'_, ServiceRegistry> {
+        self.registry.write().await
     }
 
-    /// 健康检查
-    pub async fn health_check(&mut self) -> Result<bool> {
-        let _ = self
-            .client
-            .get("health".to_string(), None)
+    /// 从 etcd 获取所有服务
+    pub async fn discover_all_services(&self) -> Result<Vec<ServiceInfo>> {
+        let service_prefix = "rapidcron/services".to_string();
+
+        let options = Some(GetOptions::new().with_prefix());
+
+        let mut client = self.client.lock().await;
+        let response = client
+            .get(service_prefix, options)
             .await
-            .map_err(|e| Error::Etcd(format!("健康检查失败: {}", e)))?;
-        Ok(true)
+            .map_err(|e| Error::Etcd(format!("获取所有服务失败: {}", e)))?;
+
+        if response.kvs().is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut services = Vec::new();
+        for kv in response.kvs() {
+            if let Ok(service) = serde_json::from_slice::<ServiceInfo>(kv.value()) {
+                services.push(service);
+            }
+        }
+
+        debug!("发现所有服务: {} 个实例", services.len());
+
+        Ok(services)
     }
 }

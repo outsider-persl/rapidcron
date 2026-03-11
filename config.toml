@@ -6,7 +6,7 @@ grpc_port = 50051
 
 [logging]
 # info/debug/warn/error
-level = "info"
+level = "debug"
 # json/plain
 format = "plain"
 # stdout/file/both
@@ -25,11 +25,47 @@ host = "localhost"
 port = 5672
 username = "guest"
 password = "guest"
+queue_name = "rapidcron-tasks"
 
 [etcd]
 host = "localhost"
 port = 2379
+service_prefix = "rapidcron/services"
+# 心跳间隔（秒）
+heartbeat_interval_secs = 10
+# 服务离线阈值（秒）- 超过这个时间没有心跳标记为离线
+offline_threshold_secs = 30
+# 服务剔除阈值（秒）- 超过这个时间没有心跳标记为永久下线
+dead_threshold_secs = 60
+
+[dispatcher]
+# 扫描间隔（秒）
+scan_interval_secs = 30
+# 最大并发任务数
+max_concurrent_tasks = 10
+# 调度日志保留天数
+log_retention_days = 30
+
+[retry]
+# 重试扫描间隔（秒）
+scan_interval_secs = 60
+# 每次扫描的最大任务数
+batch_size = 100
+# 默认最大重试次数
+default_max_retries = 3
+# 默认重试策略：fixed/exponential/linear
+default_strategy = "exponential"
+# 指数退避基础延迟（秒）
+exponential_base_delay = 5
+# 指数退避最大延迟（秒）
+exponential_max_delay = 300
 
 [metrics]
 enabled = true
 port = 9090
+
+[service]
+# 服务名称
+service_name = "rapidcron-dispatcher"
+# 服务元数据
+metadata = "dispatcher"

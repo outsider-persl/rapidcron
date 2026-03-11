@@ -1,7 +1,7 @@
 use crate::error::{Error, Result};
 use crate::storage::mongo::MongoDataSource;
 use crate::types::{ExecutionResult, Task, TaskInstance, TaskStatus};
-use chrono::{Duration, Local};
+use chrono::{Duration, Utc};
 use mongodb::bson::{doc, oid::ObjectId};
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
@@ -163,7 +163,7 @@ impl RetryManager {
         }
 
         let delay_seconds = self.calculate_retry_delay(&task, &instance, &retry_config);
-        let retry_time = Local::now() + Duration::seconds(delay_seconds);
+        let retry_time = Utc::now() + Duration::seconds(delay_seconds);
 
         let update = doc! {
             "$set": {
@@ -279,7 +279,7 @@ impl RetryManager {
 
     /// 清理过期的失败任务实例
     pub async fn cleanup_old_failed_instances(&self, days_old: i64) -> Result<usize> {
-        let cutoff_time = Local::now() - Duration::days(days_old);
+        let cutoff_time = Utc::now() - Duration::days(days_old);
 
         let filter = doc! {
             "status": "failed",

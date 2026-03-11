@@ -1,8 +1,9 @@
-// lib.rs - 库入口，供测试使用
+pub mod api;
 pub mod config;
+pub mod coord;
 pub mod error;
+pub mod executor;
 pub mod logging;
+pub mod scheduler;
 pub mod storage;
 pub mod types;
-mod scheduler;
-pub mod executor;

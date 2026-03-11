@@ -1,15 +1,14 @@
 use crate::error::{Error, Result};
-use crate::executor::{TaskMessage, TaskQueue};
+use crate::executor::TaskQueue;
 use crate::scheduler::cron_parser::CronParser;
-use crate::scheduler::sorter::TaskSorter;
 use crate::storage::mongo::MongoDataSource;
-use crate::types::{Task, TaskInstance, TaskStatus};
-use chrono::{DateTime, Local};
+use crate::types::{DispatchLog, Task, TaskInstance, TaskStatus};
+use chrono::{DateTime, Utc};
 use mongodb::bson::{doc, oid::ObjectId};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 /// 任务分发器
 pub struct Dispatcher {
@@ -17,20 +16,22 @@ pub struct Dispatcher {
     task_queue: Arc<TaskQueue>,
     running: Arc<RwLock<bool>>,
     scan_interval: Duration,
+    log_retention_days: u32,
 }
 
 impl Dispatcher {
-    /// 创建新的分发器
     pub fn new(
         db: Arc<MongoDataSource>,
         task_queue: Arc<TaskQueue>,
         scan_interval_secs: u64,
+        log_retention_days: u32,
     ) -> Self {
         Self {
             db,
             task_queue,
             running: Arc::new(RwLock::new(false)),
             scan_interval: Duration::from_secs(scan_interval_secs),
+            log_retention_days,
         }
     }
 
@@ -49,6 +50,8 @@ impl Dispatcher {
         let task_queue = Arc::clone(&self.task_queue);
         let running_flag = Arc::clone(&self.running);
         let interval = self.scan_interval;
+        let scan_interval_secs = interval.as_secs();
+        let log_retention_days = self.log_retention_days;
 
         tokio::spawn(async move {
             let mut timer = tokio::time::interval(interval);
@@ -56,7 +59,7 @@ impl Dispatcher {
             while *running_flag.read().await {
                 timer.tick().await;
 
-                match Self::scan_and_dispatch(&db, &task_queue).await {
+                match Self::scan_and_dispatch(&db, &task_queue, scan_interval_secs).await {
                     Ok(count) => {
                         if count > 0 {
                             info!("成功分发 {} 个任务", count);
@@ -65,6 +68,10 @@ impl Dispatcher {
                     Err(e) => {
                         error!("任务分发失败: {}", e);
                     }
+                }
+
+                if let Err(e) = Self::cleanup_old_logs(&db, log_retention_days).await {
+                    error!("清理旧日志失败: {}", e);
                 }
             }
 
@@ -86,10 +93,15 @@ impl Dispatcher {
     async fn scan_and_dispatch(
         db: &Arc<MongoDataSource>,
         task_queue: &Arc<TaskQueue>,
+        scan_interval_secs: u64,
     ) -> Result<usize> {
-        let now = Local::now();
+        let now = Utc::now();
+        let scan_window = chrono::Duration::seconds(scan_interval_secs as i64);
+        let scan_window_start = now;
+        let scan_window_end = now + scan_window;
 
         debug!("开始扫描待执行任务，当前时间: {}", now);
+        debug!("扫描窗口: {} 到 {}", scan_window_start, scan_window_end);
 
         let enabled_tasks = db
             .find_tasks(
@@ -102,55 +114,41 @@ impl Dispatcher {
             .await
             .map_err(|e| Error::Database(format!("查询任务失败: {}", e)))?;
 
+        let total_tasks = enabled_tasks.len() as i32;
+
         if enabled_tasks.is_empty() {
             debug!("没有启用的任务");
-            return Ok(0);
-        }
 
-        let mut tasks_to_dispatch: Vec<Task> = Vec::new();
+            let dispatch_log = DispatchLog {
+                id: None,
+                scan_time: now,
+                scan_window_start,
+                scan_window_end,
+                total_tasks: 0,
+                enabled_tasks: 0,
+                dispatched_instances: 0,
+                error_message: None,
+            };
 
-        for task in enabled_tasks {
-            if let Some(_task_id) = task.id {
-                match Self::should_dispatch_task(db, &task, &now).await {
-                    Ok(true) => {
-                        debug!("任务 {} 需要分发", task.name);
-                        tasks_to_dispatch.push(task);
-                    }
-                    Ok(false) => {
-                        debug!("任务 {} 暂时不需要分发", task.name);
-                    }
-                    Err(e) => {
-                        warn!("检查任务 {} 是否需要分发时出错: {}", task.name, e);
-                    }
-                }
+            if let Err(e) = db.create_dispatch_log(&dispatch_log).await {
+                error!("创建调度日志失败: {}", e);
             }
-        }
 
-        if tasks_to_dispatch.is_empty() {
-            debug!("没有需要分发的任务");
             return Ok(0);
         }
-
-        let sorted_tasks = TaskSorter::sort_tasks(&tasks_to_dispatch)
-            .map_err(|e| Error::Scheduling(format!("任务排序失败: {}", e)))?;
-
-        let grouped_tasks = TaskSorter::group_tasks_by_dependency(&sorted_tasks)
-            .map_err(|e| Error::Scheduling(format!("任务分组失败: {}", e)))?;
 
         let mut dispatched_count = 0;
 
-        for (group_index, group) in grouped_tasks.iter().enumerate() {
-            info!(
-                "开始分发第 {} 组任务，共 {} 个任务",
-                group_index + 1,
-                group.len()
-            );
-
-            for task in group {
-                match Self::dispatch_single_task(db, task_queue, task, &now).await {
-                    Ok(_) => {
-                        dispatched_count += 1;
-                        debug!("成功分发任务: {}", task.name);
+        for task in enabled_tasks {
+            if let Some(_task_id) = task.id {
+                match Self::dispatch_task_instances(db, task_queue, &task, &now, &scan_window_end)
+                    .await
+                {
+                    Ok(count) => {
+                        if count > 0 {
+                            info!("为任务 {} 创建并分发了 {} 个实例", task.name, count);
+                            dispatched_count += count;
+                        }
                     }
                     Err(e) => {
                         error!("分发任务 {} 失败: {}", task.name, e);
@@ -159,15 +157,37 @@ impl Dispatcher {
             }
         }
 
+        let dispatch_log = DispatchLog {
+            id: None,
+            scan_time: now,
+            scan_window_start,
+            scan_window_end,
+            total_tasks,
+            enabled_tasks: total_tasks,
+            dispatched_instances: dispatched_count as i32,
+            error_message: None,
+        };
+
+        if let Err(e) = db.create_dispatch_log(&dispatch_log).await {
+            error!("创建调度日志失败: {}", e);
+        }
+
+        info!(
+            "调度扫描完成: 总任务数 {}, 启用任务数 {}, 分发实例数 {}",
+            total_tasks, total_tasks, dispatched_count
+        );
+
         Ok(dispatched_count)
     }
 
-    /// 检查任务是否需要分发
-    async fn should_dispatch_task(
+    /// 为任务创建并分发实例
+    async fn dispatch_task_instances(
         db: &Arc<MongoDataSource>,
+        task_queue: &Arc<TaskQueue>,
         task: &Task,
-        now: &DateTime<Local>,
-    ) -> Result<bool> {
+        now: &DateTime<Utc>,
+        scan_window_end: &DateTime<Utc>,
+    ) -> Result<usize> {
         let task_id = task
             .id
             .ok_or_else(|| Error::Validation("任务 ID 不能为空".to_string()))?;
@@ -175,92 +195,99 @@ impl Dispatcher {
         let cron_parser = CronParser::new(&task.schedule)
             .map_err(|e| Error::Scheduling(format!("解析 Cron 表达式失败: {}", e)))?;
 
-        let next_trigger = cron_parser
-            .next_trigger()
-            .ok_or_else(|| Error::Scheduling("无法获取下一次触发时间".to_string()))?;
+        let next_triggers = cron_parser.next_triggers_in_window(*now, *scan_window_end);
 
-        let next_trigger_local = next_trigger.with_timezone(&Local);
-
-        if next_trigger_local > *now {
-            return Ok(false);
+        if next_triggers.is_empty() {
+            return Ok(0);
         }
 
-        let recent_instances = db
+        let existing_instances = db
             .find_task_instances(
                 Some(doc! {
                     "task_id": task_id,
-                    "status": { "$ne": "cancelled" }
+                    "scheduled_time": { "$gte": now, "$lte": scan_window_end }
                 }),
                 None,
             )
             .await
             .map_err(|e| Error::Database(format!("查询任务实例失败: {}", e)))?;
 
-        for instance in recent_instances {
-            if instance.scheduled_time >= next_trigger_local {
-                return Ok(false);
+        let existing_scheduled_times: std::collections::HashSet<i64> = existing_instances
+            .iter()
+            .map(|inst| inst.scheduled_time.timestamp())
+            .collect();
+
+        let mut dispatched_count = 0;
+
+        for scheduled_time in next_triggers {
+            let scheduled_timestamp = scheduled_time.timestamp();
+
+            if existing_scheduled_times.contains(&scheduled_timestamp) {
+                debug!(
+                    "任务 {} 在 {} 的实例已存在，跳过",
+                    task.name, scheduled_time
+                );
+                continue;
             }
+
+            let instance = TaskInstance {
+                id: None,
+                task_id,
+                scheduled_time,
+                status: TaskStatus::Pending,
+                executor_id: None,
+                start_time: None,
+                end_time: None,
+                retry_count: 0,
+                result: None,
+                created_at: *now,
+            };
+
+            let instance_id = db
+                .create_task_instance(&instance)
+                .await
+                .map_err(|e| Error::Database(format!("创建任务实例失败: {}", e)))?;
+
+            let task_msg = crate::executor::TaskMessage {
+                instance_id,
+                task_id,
+                task_name: task.name.clone(),
+                scheduled_time: scheduled_timestamp,
+                retry_count: 0,
+            };
+
+            task_queue
+                .publish_task(task_msg)
+                .await
+                .map_err(|e| Error::MessageQueue(format!("发布任务到队列失败: {}", e)))?;
+
+            debug!(
+                "为任务 {} 创建实例 {}，计划执行时间: {}",
+                task.name, instance_id, scheduled_time
+            );
+
+            dispatched_count += 1;
         }
 
-        Ok(true)
+        Ok(dispatched_count)
     }
 
-    /// 分发单个任务
-    async fn dispatch_single_task(
-        db: &Arc<MongoDataSource>,
-        task_queue: &Arc<TaskQueue>,
-        task: &Task,
-        now: &DateTime<Local>,
-    ) -> Result<ObjectId> {
-        let task_id = task
-            .id
-            .ok_or_else(|| Error::Validation("任务 ID 不能为空".to_string()))?;
+    /// 清理旧日志
+    async fn cleanup_old_logs(db: &Arc<MongoDataSource>, retention_days: u32) -> Result<()> {
+        let cutoff_time = Utc::now() - chrono::Duration::days(retention_days as i64);
 
-        let cron_parser = CronParser::new(&task.schedule)
-            .map_err(|e| Error::Scheduling(format!("解析 Cron 表达式失败: {}", e)))?;
+        debug!("开始清理 {} 天前的调度日志", retention_days);
 
-        let scheduled_time = cron_parser
-            .next_trigger()
-            .ok_or_else(|| Error::Scheduling("无法获取触发时间".to_string()))?
-            .with_timezone(&Local);
-
-        let instance = TaskInstance {
-            id: None,
-            task_id,
-            scheduled_time,
-            status: TaskStatus::Pending,
-            executor_id: None,
-            start_time: None,
-            end_time: None,
-            retry_count: 0,
-            result: None,
-            created_at: *now,
-        };
-
-        let instance_id = db
-            .create_task_instance(instance)
+        let deleted_dispatch_logs = db
+            .delete_dispatch_logs_before(&cutoff_time)
             .await
-            .map_err(|e| Error::Database(format!("创建任务实例失败: {}", e)))?;
+            .map_err(|e| Error::Database(format!("清理调度日志失败: {}", e)))?;
 
-        let task_msg = crate::executor::TaskMessage {
-            instance_id,
-            task_id,
-            task_name: task.name.clone(),
-            scheduled_time: scheduled_time.timestamp(),
-            retry_count: 0,
-        };
+        if deleted_dispatch_logs > 0 {
+            info!("已清理 {} 条调度日志", deleted_dispatch_logs);
+        }
 
-        task_queue
-            .publish_task(task_msg)
-            .await
-            .map_err(|e| Error::MessageQueue(format!("发布任务到队列失败: {}", e)))?;
-
-        info!(
-            "已为任务 {} 创建实例 {}，计划执行时间: {}，已发布到队列",
-            task.name, instance_id, scheduled_time
-        );
-
-        Ok(instance_id)
+        Ok(())
     }
 
     /// 手动触发任务执行
@@ -275,7 +302,7 @@ impl Dispatcher {
             .map_err(|e| Error::Database(format!("查询任务失败: {}", e)))?
             .ok_or_else(|| Error::Validation("任务不存在".to_string()))?;
 
-        let now = Local::now();
+        let now = Utc::now();
 
         let instance = TaskInstance {
             id: None,
@@ -292,7 +319,7 @@ impl Dispatcher {
 
         let instance_id = self
             .db
-            .create_task_instance(instance)
+            .create_task_instance(&instance)
             .await
             .map_err(|e| Error::Database(format!("创建任务实例失败: {}", e)))?;
 

@@ -1,3 +1,4 @@
+mod api;
 mod config;
 mod coord;
 mod error;
@@ -8,39 +9,52 @@ mod storage;
 mod types;
 
 use anyhow::Result;
+use axum::Router;
 use coord::ServiceInfo;
 use executor::TaskQueue;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Mutex;
 use tokio::time::interval;
-use tracing::{error, info};
+use tower_http::cors::CorsLayer;
+use tracing::{debug, error, info};
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let cfg = config::load("config.toml")?;
-    let _log_guard = logging::init(&cfg.logging)?;
+    logging::init(&cfg.logging)?;
     info!("configuration loaded");
 
     let db = Arc::new(storage::mongo::MongoDataSource::new(&cfg.database).await?);
     info!("mongodb connection established");
 
     let etcd_endpoints = vec![format!("{}:{}", cfg.etcd.host, cfg.etcd.port)];
-    let mut etcd_manager = coord::EtcdManager::new(etcd_endpoints).await?;
+    let etcd_manager =
+        coord::EtcdManager::new_with_prefix(etcd_endpoints, cfg.etcd.service_prefix.clone())
+            .await?;
     info!("etcd connection established");
 
+    let etcd_manager = Arc::new(etcd_manager);
+
+    let now = chrono::Utc::now().timestamp();
+
     let service_info = ServiceInfo {
-        service_name: "rapidcron-dispatcher".to_string(),
+        service_name: cfg.service.service_name.clone(),
         service_id: uuid::Uuid::new_v4().to_string(),
         host: cfg.server.host.clone(),
         port: cfg.server.http_port,
-        metadata: Some("dispatcher".to_string()),
+        metadata: Some(cfg.service.metadata.clone()),
+        started_at: now,
+        last_heartbeat: now,
     };
+
+    let lease_ttl_secs = cfg.etcd.dead_threshold_secs as i64;
 
     etcd_manager
         .registry()
-        .register(service_info.clone())
+        .await
+        .register(service_info.clone(), lease_ttl_secs)
         .await?;
-    info!("service registered");
 
     let amqp_url = format!(
         "amqp://{}:{}@{}:{}",
@@ -50,16 +64,20 @@ async fn main() -> Result<()> {
     let task_queue = Arc::new(
         TaskQueue::new(
             &amqp_url,
-            "rapidcron-tasks".to_string(),
-            "rapidcron-dispatcher".to_string(),
-            10,
+            cfg.rabbitmq.queue_name.clone(),
+            cfg.service.service_name.clone(),
+            cfg.dispatcher.max_concurrent_tasks,
         )
         .await?,
     );
     info!("rabbitmq task queue initialized");
 
-    let dispatcher =
-        scheduler::dispatcher::Dispatcher::new(Arc::clone(&db), Arc::clone(&task_queue), 60);
+    let dispatcher = scheduler::dispatcher::Dispatcher::new(
+        Arc::clone(&db),
+        Arc::clone(&task_queue),
+        cfg.dispatcher.scan_interval_secs,
+        cfg.dispatcher.log_retention_days,
+    );
     dispatcher.start().await?;
     info!("task dispatcher started");
 
@@ -67,10 +85,13 @@ async fn main() -> Result<()> {
     info!("retry manager initialized");
 
     tokio::spawn(async move {
-        let mut timer = interval(Duration::from_secs(60));
+        let mut timer = interval(Duration::from_secs(cfg.retry.scan_interval_secs));
         loop {
             timer.tick().await;
-            match retry_manager.retry_failed_tasks(None, 100).await {
+            match retry_manager
+                .retry_failed_tasks(None, cfg.retry.batch_size)
+                .await
+            {
                 Ok(count) => {
                     if count > 0 {
                         info!("安排了 {} 个失败任务重试", count);
@@ -84,8 +105,26 @@ async fn main() -> Result<()> {
     });
     info!("retry scheduler started");
 
+    let api_router = api::create_router_with_etcd((*db).clone(), etcd_manager.clone());
+
+    let app = Router::new()
+        .nest("/api", api_router)
+        .layer(CorsLayer::permissive());
+
+    let listener =
+        tokio::net::TcpListener::bind(format!("{}:{}", cfg.server.host, cfg.server.http_port))
+            .await?;
     info!(
-        "RapidCron server is running on {}:{}",
+        "API server listening on http://{}:{}",
+        cfg.server.host, cfg.server.http_port
+    );
+
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    info!(
+        "RapidCron server is running on http://{}:{}",
         cfg.server.host, cfg.server.http_port
     );
 
@@ -97,6 +136,7 @@ async fn main() -> Result<()> {
 
     etcd_manager
         .registry()
+        .await
         .deregister(&service_info.service_name)
         .await?;
     info!("service deregistered");

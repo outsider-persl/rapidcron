@@ -2,6 +2,14 @@
 
 db = db.getSiblingDB('rapidcron'); // 切换到目标数据库
 
+// 清理旧数据
+print("清理旧数据...");
+db.tasks.deleteMany({});
+db.task_instances.deleteMany({});
+db.execution_logs.deleteMany({});
+db.dispatch_logs.deleteMany({});
+print("✓ 旧数据已清理");
+
 // ======================
 // 1. tasks 集合
 // ======================
@@ -27,21 +35,28 @@ db.tasks.createIndex(
 db.tasks.createIndex({ deleted_at: 1 });
 
 // 插入测试数据
-db.tasks.insertOne({
+var taskData = {
   _id: ObjectId("670000000000000000000001"),
-  name: "Test HTTP Task",
-  description: "A simple HTTP task for testing",
+  name: "Test Simple Executor",
+  description: "每10秒调用一次 simple-executor 的测试接口",
   dependency_ids: [],
   type: "http",
-  schedule: "0 0 * * * *", // 每天午夜执行
+  schedule: "*/10 * * * * *",
   enabled: true,
-  payload: { url: "https://example.com/health", method: "GET" },
-  timeout_seconds: 30,
-  max_retries: 3,
-  created_at: new Date("2026-02-15T00:00:00"),
-  updated_at: new Date("2026-02-15T00:00:00"),
+  payload: {
+    url: "http://127.0.0.1:3000/execute",
+    method: "GET"
+  },
+  timeout_seconds: NumberInt(30),
+  max_retries: NumberInt(3),
+  created_at: new Date(),
+  updated_at: new Date(),
   deleted_at: null
-});
+};
+
+print("插入测试数据...");
+db.tasks.insertOne(taskData);
+print("✓ 测试数据已插入");
 
 // ======================
 // 2. task_instances 集合
@@ -55,20 +70,6 @@ db.task_instances.createIndex({ status: 1 });
 db.task_instances.createIndex({ scheduled_time: 1 });
 db.task_instances.createIndex({ end_time: 1 });
 
-// 插入测试数据
-db.task_instances.insertOne({
-  _id: ObjectId("670000000000000000000101"),
-  task_id: ObjectId("670000000000000000000001"),
-  scheduled_time: new Date("2026-02-16T00:00:00"),
-  status: "pending",
-  executor_id: null,
-  start_time: null,
-  end_time: null,
-  retry_count: 0,
-  result: null,
-  created_at: new Date("2026-02-15T06:00:00")
-});
-
 // ======================
 // 3. execution_logs 集合
 // ======================
@@ -81,20 +82,15 @@ db.execution_logs.createIndex({ scheduled_time: 1 });
 db.execution_logs.createIndex({ status: 1, end_time: -1 });
 db.execution_logs.createIndex({ triggered_by: 1, end_time: -1 });
 
-// 插入测试数据（模拟一次成功执行）
-db.execution_logs.insertOne({
-  _id: ObjectId("670000000000000000000201"),
-  task_id: ObjectId("670000000000000000000001"),
-  task_name: "Test HTTP Task",
-  instance_id: ObjectId("670000000000000000000101"),
-  scheduled_time: new Date("2026-02-16T00:00:00"),
-  start_time: new Date("2026-02-16T00:00:05"),
-  end_time: new Date("2026-02-16T00:00:10"),
-  status: "success",
-  duration_ms: 5000,
-  output_summary: "HTTP 200 OK",
-  error_message: null,
-  triggered_by: "scheduler"
-});
+// ======================
+// 4. dispatch_logs 集合
+// ======================
+
+db.createCollection("dispatch_logs");
+
+// 创建索引
+db.dispatch_logs.createIndex({ scan_time: -1 });
+db.dispatch_logs.createIndex({ task_id: 1, scan_time: -1 });
+db.dispatch_logs.createIndex({ executor_id: 1, scan_time: -1 });
 
 print("✅ Database initialized with collections, indexes, and sample data.");

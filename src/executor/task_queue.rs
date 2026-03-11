@@ -24,7 +24,7 @@ pub struct TaskMessage {
 
 /// 任务队列
 pub struct TaskQueue {
-    connection: Arc<Connection>,
+    _connection: Arc<Connection>,
     channel: Arc<Channel>,
     queue_name: String,
     executor_id: String,
@@ -69,7 +69,7 @@ impl TaskQueue {
         info!("成功连接到 RabbitMQ: {}", queue_name);
 
         Ok(Self {
-            connection: Arc::new(connection),
+            _connection: Arc::new(connection),
             channel: Arc::new(channel),
             queue_name,
             executor_id,
