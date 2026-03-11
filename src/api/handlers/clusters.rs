@@ -3,26 +3,19 @@ use reqwest::Client;
 use std::sync::Arc;
 
 use crate::{
-    api::tasks::ApiState,
-    coord::{EtcdManager, ServiceInfo},
+    coord::EtcdManager,
     error::Error,
     types::{ApiResponse, ClusterNode, ClusterResponse, TaskInstance, TaskStatus},
 };
 
+use super::super::models::api_state::ApiState;
+
 /// 节点信息响应（从executor获取）
 #[derive(Debug, serde::Deserialize)]
 struct ExecutorNodeInfo {
-    node_name: String,
-    node_id: String,
-    host: String,
-    port: u16,
-    status: String,
     cpu_usage: f64,
     memory_usage: f64,
     memory_total: u64,
-    active_tasks: u64,
-    metadata: Option<String>,
-    timestamp: i64,
 }
 
 /// API 状态（扩展以支持集群信息）
@@ -91,12 +84,12 @@ pub async fn get_cluster_info(
         };
 
         let executor_url = format!("http://{}:{}/node", service.host, service.port);
-        if let Ok(response) = client.get(&executor_url).send().await {
-            if let Ok(node_info) = response.json::<ExecutorNodeInfo>().await {
-                node.cpu_usage = node_info.cpu_usage;
-                node.memory_usage = node_info.memory_usage;
-                node.memory_total = node_info.memory_total;
-            }
+        if let Ok(response) = client.get(&executor_url).send().await
+            && let Ok(node_info) = response.json::<ExecutorNodeInfo>().await
+        {
+            node.cpu_usage = node_info.cpu_usage;
+            node.memory_usage = node_info.memory_usage;
+            node.memory_total = node_info.memory_total;
         }
 
         nodes.push(node);

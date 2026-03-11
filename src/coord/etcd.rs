@@ -2,6 +2,7 @@ use crate::error::{Error, Result};
 use etcd_client::{Client, GetOptions, PutOptions};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
@@ -41,7 +42,7 @@ impl ServiceRegistry {
     pub async fn register(&self, service: ServiceInfo, lease_ttl_secs: i64) -> Result<i64> {
         let key = format!("{}/{}", self.service_prefix, service.service_name);
 
-        let value = serde_json::to_string(&service).map_err(|e| Error::Serialization(e))?;
+        let value = serde_json::to_string(&service).map_err(Error::Serialization)?;
 
         let lease = self
             .client
@@ -67,7 +68,7 @@ impl ServiceRegistry {
         drop(leases);
 
         info!(
-            "服务注册成功: {} ({}) - Lease: {}",
+            "[KeepAlive] 服务注册成功: {} ({}) - Lease: {}",
             service.service_name, service.service_id, lease_id
         );
 
@@ -91,7 +92,7 @@ impl ServiceRegistry {
                     Ok(result) => result,
                     Err(e) => {
                         error!(
-                            "启动 KeepAlive 失败 (服务: {}, Lease: {}): {}",
+                            "[KeepAlive] 启动 KeepAlive 失败 (服务: {}, Lease: {}): {}",
                             service_name_clone, lease_id, e
                         );
                         return;
@@ -106,7 +107,7 @@ impl ServiceRegistry {
 
                 if let Err(e) = keeper.keep_alive().await {
                     error!(
-                        "KeepAlive 失败 (服务: {}, Lease: {}): {}",
+                        "[KeepAlive] KeepAlive 失败 (服务: {}, Lease: {}): {}",
                         service_name_clone, lease_id, e
                     );
                     break;
@@ -115,7 +116,7 @@ impl ServiceRegistry {
                 match stream.message().await {
                     Ok(Some(resp)) => {
                         debug!(
-                            "心跳发送成功 (服务: {}, Lease: {}), TTL: {}s",
+                            "[KeepAlive] 心跳发送成功 (服务: {}, Lease: {}), TTL: {}s",
                             service_name_clone,
                             lease_id,
                             resp.ttl()
@@ -125,30 +126,28 @@ impl ServiceRegistry {
                         let mut client = client.lock().await;
 
                         let get_result = client.get(key.clone(), None).await;
-                        if let Ok(get_resp) = get_result {
-                            if let Some(kv) = get_resp.kvs().first() {
-                                if let Ok(mut service_info) =
-                                    serde_json::from_slice::<ServiceInfo>(kv.value())
-                                {
-                                    service_info.last_heartbeat = chrono::Utc::now().timestamp();
-                                    if let Ok(value) = serde_json::to_string(&service_info) {
-                                        let options = PutOptions::new().with_lease(lease_id);
-                                        let _ = client.put(key, value, Some(options)).await;
-                                    }
-                                }
+                        if let Ok(get_resp) = get_result
+                            && let Some(kv) = get_resp.kvs().first()
+                            && let Ok(mut service_info) =
+                                serde_json::from_slice::<ServiceInfo>(kv.value())
+                        {
+                            service_info.last_heartbeat = chrono::Utc::now().timestamp();
+                            if let Ok(value) = serde_json::to_string(&service_info) {
+                                let options = PutOptions::new().with_lease(lease_id);
+                                let _ = client.put(key, value, Some(options)).await;
                             }
                         }
                     }
                     Ok(None) => {
                         error!(
-                            "KeepAlive 流已关闭 (服务: {}, Lease: {}), 服务可能被剔除",
+                            "[KeepAlive] KeepAlive 流已关闭 (服务: {}, Lease: {}), 服务可能被剔除",
                             service_name_clone, lease_id
                         );
                         break;
                     }
                     Err(e) => {
                         error!(
-                            "KeepAlive 响应读取失败 (服务: {}, Lease: {}): {}",
+                            "[KeepAlive] KeepAlive 响应读取失败 (服务: {}, Lease: {}): {}",
                             service_name_clone, lease_id, e
                         );
                         break;
@@ -177,7 +176,10 @@ impl ServiceRegistry {
                 .await
                 .map_err(|e| Error::Etcd(format!("撤销 Lease 失败: {}", e)))?;
 
-            info!("Lease 已撤销: {} (Lease: {})", service_name, lease_id);
+            info!(
+                "[KeepAlive] Lease 已撤销: {} (Lease: {})",
+                service_name, lease_id
+            );
         }
 
         self.client
@@ -194,11 +196,11 @@ impl ServiceRegistry {
         let mut tasks = self.keepalive_tasks.write().await;
         if let Some(task) = tasks.remove(service_name) {
             task.abort();
-            info!("KeepAlive 任务已停止: {}", service_name);
+            info!("[KeepAlive] KeepAlive 任务已停止: {}", service_name);
         }
         drop(tasks);
 
-        info!("服务注销成功: {}", service_name);
+        info!("[KeepAlive] 服务注销成功: {}", service_name);
 
         Ok(())
     }
@@ -211,31 +213,46 @@ pub struct EtcdManager {
 }
 
 impl EtcdManager {
-    /// 创建新的 etcd 管理器
-    pub async fn new(endpoints: Vec<String>) -> Result<Self> {
-        let client = Client::connect(endpoints, None)
-            .await
-            .map_err(|e| Error::Etcd(format!("连接 etcd 失败: {}", e)))?;
+    /// 尝试连接 etcd，带有重试机制
+    async fn connect_with_retry(
+        endpoints: Vec<String>,
+        max_retries: usize,
+        retry_delay: Duration,
+    ) -> Result<Client> {
+        let mut last_error = None;
 
-        let registry = ServiceRegistry::new(client.clone(), "rapidcron/services".to_string());
+        for attempt in 1..=max_retries {
+            match Client::connect(endpoints.clone(), None).await {
+                Ok(client) => {
+                    info!("[Etcd] etcd 连接成功 (尝试 {} / {})", attempt, max_retries);
+                    return Ok(client);
+                }
+                Err(e) => {
+                    error!(
+                        "[Etcd] etcd 连接失败 (尝试 {} / {}): {}",
+                        attempt, max_retries, e
+                    );
+                    last_error = Some(e);
 
-        info!("etcd 连接成功");
+                    if attempt < max_retries {
+                        warn!("[Etcd] 将在 {:?} 后重试...", retry_delay);
+                        tokio::time::sleep(retry_delay).await;
+                    }
+                }
+            }
+        }
 
-        Ok(Self {
-            client: Arc::new(Mutex::new(client)),
-            registry: RwLock::new(registry),
-        })
+        Err(Error::Etcd(format!(
+            "多次尝试后连接 etcd 失败: {:?}",
+            last_error
+        )))
     }
 
     /// 创建新的 etcd 管理器（指定前缀）
     pub async fn new_with_prefix(endpoints: Vec<String>, service_prefix: String) -> Result<Self> {
-        let client = Client::connect(endpoints, None)
-            .await
-            .map_err(|e| Error::Etcd(format!("连接 etcd 失败: {}", e)))?;
+        let client = Self::connect_with_retry(endpoints, 5, Duration::from_secs(2)).await?;
 
         let registry = ServiceRegistry::new(client.clone(), service_prefix);
-
-        info!("etcd 连接成功");
 
         Ok(Self {
             client: Arc::new(Mutex::new(client)),
@@ -271,7 +288,7 @@ impl EtcdManager {
             }
         }
 
-        debug!("发现所有服务: {} 个实例", services.len());
+        debug!("[Etcd] 发现所有服务: {} 个实例", services.len());
 
         Ok(services)
     }

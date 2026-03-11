@@ -2,7 +2,6 @@ use crate::config::LoggingConfig;
 use anyhow::Result;
 use std::fs;
 use time::OffsetDateTime;
-use tracing_appender;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 /// 初始化日志系统
@@ -59,7 +58,7 @@ fn init_stdout(config: &LoggingConfig, env_filter: EnvFilter) -> Result<()> {
 }
 
 fn init_file(config: &LoggingConfig, env_filter: EnvFilter, date_str: &str) -> Result<()> {
-    let writer = tracing_appender::rolling::never(&config.log_file, &format!("{}.log", date_str));
+    let writer = tracing_appender::rolling::never(&config.log_file, format!("{}.log", date_str));
 
     match config.format.as_str() {
         "json" => {
@@ -89,7 +88,7 @@ fn init_file(config: &LoggingConfig, env_filter: EnvFilter, date_str: &str) -> R
 }
 
 fn init_both(config: &LoggingConfig, env_filter: EnvFilter, date_str: &str) -> Result<()> {
-    let writer = tracing_appender::rolling::never(&config.log_file, &format!("{}.log", date_str));
+    let writer = tracing_appender::rolling::never(&config.log_file, format!("{}.log", date_str));
 
     match config.format.as_str() {
         "json" => {

@@ -1,10 +1,11 @@
 use crate::error::{Error, Result};
+use crate::executor::TaskQueue;
 use crate::storage::mongo::MongoDataSource;
 use crate::types::{ExecutionResult, Task, TaskInstance, TaskStatus};
 use chrono::{Duration, Utc};
 use mongodb::bson::{doc, oid::ObjectId};
 use std::sync::Arc;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 /// 重试策略
 #[derive(Debug, Clone, Copy)]
@@ -33,35 +34,31 @@ impl Default for RetryStrategy {
 }
 
 /// 重试配置
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct RetryConfig {
     /// 重试策略
     pub strategy: RetryStrategy,
-    /// 最大重试次数（0 表示不重试）
-    pub max_retries: i32,
-    /// 是否在特定错误时重试
-    pub retry_on_errors: Vec<String>,
-}
-
-impl Default for RetryConfig {
-    fn default() -> Self {
-        Self {
-            strategy: RetryStrategy::default(),
-            max_retries: 3,
-            retry_on_errors: Vec::new(),
-        }
-    }
 }
 
 /// 重试管理器
 pub struct RetryManager {
     db: Arc<MongoDataSource>,
+    task_queue: Arc<TaskQueue>,
+    config: crate::config::RetryConfig,
 }
 
 impl RetryManager {
     /// 创建新的重试管理器
-    pub fn new(db: Arc<MongoDataSource>) -> Self {
-        Self { db }
+    pub fn new(
+        db: Arc<MongoDataSource>,
+        task_queue: Arc<TaskQueue>,
+        config: crate::config::RetryConfig,
+    ) -> Self {
+        Self {
+            db,
+            task_queue,
+            config,
+        }
     }
 
     /// 判断是否应该重试
@@ -71,23 +68,23 @@ impl RetryManager {
         instance: &TaskInstance,
         result: &ExecutionResult,
     ) -> bool {
-        let max_retries = task.max_retries.unwrap_or(3);
+        let max_retries = task.max_retries.unwrap_or(self.config.default_max_retries);
 
         if max_retries <= 0 {
-            debug!("任务 {} 配置不重试", task.name);
+            debug!("[RetryManager] 任务 {} 配置不重试", task.name);
             return false;
         }
 
         if instance.retry_count >= max_retries {
             debug!(
-                "任务 {} 已达到最大重试次数: {}",
+                "[RetryManager] 任务 {} 已达到最大重试次数: {}",
                 task.name, instance.retry_count
             );
             return false;
         }
 
         if result.error.is_none() {
-            debug!("任务 {} 执行成功，无需重试", task.name);
+            debug!("[RetryManager] 任务 {} 执行成功，无需重试", task.name);
             return false;
         }
 
@@ -151,14 +148,23 @@ impl RetryManager {
         let retry_count = instance.retry_count;
         let task_name = task.name.clone();
 
-        let retry_config = config.unwrap_or_else(|| RetryConfig {
-            strategy: RetryStrategy::default(),
-            max_retries: task.max_retries.unwrap_or(3),
-            retry_on_errors: Vec::new(),
+        let retry_config = config.unwrap_or_else(|| {
+            let strategy = match self.config.default_strategy.as_str() {
+                "fixed" => RetryStrategy::Fixed { delay_seconds: 5 },
+                "linear" => RetryStrategy::Linear {
+                    initial_delay_seconds: 5,
+                    increment_seconds: 5,
+                },
+                _ => RetryStrategy::Exponential {
+                    base_delay_seconds: self.config.exponential_base_delay,
+                    max_delay_seconds: self.config.exponential_max_delay,
+                },
+            };
+            RetryConfig { strategy }
         });
 
         if !self.should_retry(&task, &instance, result) {
-            debug!("任务 {} 不满足重试条件", task_name);
+            debug!("[RetryManager] 任务 {} 不满足重试条件", task_name);
             return Ok(false);
         }
 
@@ -181,8 +187,22 @@ impl RetryManager {
             .await
             .map_err(|e| Error::Execution(format!("更新任务实例失败: {}", e)))?;
 
+        // 发布任务到队列
+        let task_msg = crate::executor::TaskMessage {
+            instance_id,
+            task_id: task.id.unwrap(),
+            task_name: task.name.clone(),
+            scheduled_time: retry_time.timestamp(),
+            retry_count: retry_count + 1,
+        };
+
+        self.task_queue
+            .publish_task(task_msg)
+            .await
+            .map_err(|e| Error::Execution(format!("发布任务到队列失败: {}", e)))?;
+
         info!(
-            "任务 {} 将在 {} 秒后重试（第 {} 次重试）",
+            "[RetryManager] 任务 {} 将在 {} 秒后重试（第 {} 次重试）",
             task_name,
             delay_seconds,
             retry_count + 1
@@ -220,106 +240,18 @@ impl RetryManager {
             if let Some(instance_id) = instance.id {
                 match self.retry_task(instance_id, None).await {
                     Ok(true) => retry_count += 1,
-                    Ok(false) => debug!("任务实例 {} 不需要重试", instance_id),
-                    Err(e) => warn!("重试任务实例 {} 失败: {}", instance_id, e),
+                    Ok(false) => debug!("[RetryManager] 任务实例 {} 不需要重试", instance_id),
+                    Err(e) => warn!("[RetryManager] 重试任务实例 {} 失败: {}", instance_id, e),
                 }
             }
         }
 
-        info!("成功安排 {} 个失败任务重试", retry_count);
+        if retry_count > 0 {
+            info!("[RetryManager] 成功安排 {} 个失败任务重试", retry_count);
+        } else {
+            debug!("[RetryManager] 没有失败任务需要重试");
+        }
 
         Ok(retry_count)
     }
-
-    /// 获取重试统计信息
-    pub async fn get_retry_stats(&self, task_id: Option<ObjectId>) -> Result<RetryStats> {
-        let filter = if let Some(tid) = task_id {
-            doc! { "task_id": tid }
-        } else {
-            doc! {}
-        };
-
-        let all_instances = self
-            .db
-            .find_task_instances(Some(filter), None)
-            .await
-            .map_err(|e| Error::Database(format!("查询任务实例失败: {}", e)))?;
-
-        let mut total_retries = 0;
-        let mut max_retry_count = 0;
-        let mut failed_instances = 0;
-        let mut success_after_retry = 0;
-
-        for instance in &all_instances {
-            total_retries += instance.retry_count;
-            max_retry_count = max_retry_count.max(instance.retry_count);
-
-            if instance.status == TaskStatus::Failed {
-                failed_instances += 1;
-            } else if instance.retry_count > 0 && instance.status == TaskStatus::Success {
-                success_after_retry += 1;
-            }
-        }
-
-        let avg_retry_count = if all_instances.is_empty() {
-            0.0
-        } else {
-            total_retries as f64 / all_instances.len() as f64
-        };
-
-        Ok(RetryStats {
-            total_instances: all_instances.len(),
-            total_retries,
-            avg_retry_count,
-            max_retry_count,
-            failed_instances,
-            success_after_retry,
-        })
-    }
-
-    /// 清理过期的失败任务实例
-    pub async fn cleanup_old_failed_instances(&self, days_old: i64) -> Result<usize> {
-        let cutoff_time = Utc::now() - Duration::days(days_old);
-
-        let filter = doc! {
-            "status": "failed",
-            "end_time": { "$lt": cutoff_time }
-        };
-
-        let old_instances = self
-            .db
-            .find_task_instances(Some(filter), None)
-            .await
-            .map_err(|e| Error::Database(format!("查询旧任务实例失败: {}", e)))?;
-
-        let mut deleted_count = 0;
-
-        for instance in old_instances {
-            if let Some(instance_id) = instance.id {
-                match self.db.delete_task_instance(instance_id).await {
-                    Ok(true) => {
-                        deleted_count += 1;
-                        debug!("删除过期失败任务实例 {}", instance_id);
-                    }
-                    Ok(false) => warn!("删除任务实例 {} 失败", instance_id),
-                    Err(e) => error!("删除任务实例 {} 时出错: {}", instance_id, e),
-                }
-            }
-        }
-
-        info!("清理了 {} 个过期失败任务实例", deleted_count);
-
-        Ok(deleted_count)
-    }
-}
-
-/// 重试统计信息
-#[derive(Debug, Clone)]
-pub struct RetryStats {
-    pub total_instances: usize,
-    pub total_retries: i32,
-    pub avg_retry_count: f64,
-    pub max_retry_count: i32,
-    pub failed_instances: usize,
-    pub success_after_retry: usize,
 }

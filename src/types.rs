@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use mongodb::bson::{Bson, oid::ObjectId};
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -207,16 +208,67 @@ pub struct CreateTaskRequest {
 
 impl CreateTaskRequest {
     pub fn to_task(&self) -> Result<Task, String> {
+        // 验证任务名称
+        if self.name.is_empty() {
+            return Err("任务名称不能为空".to_string());
+        }
+        if self.name.len() > 100 {
+            return Err("任务名称长度不能超过100个字符".to_string());
+        }
+
+        // 验证描述
+        if let Some(description) = &self.description
+            && description.len() > 500
+        {
+            return Err("任务描述长度不能超过500个字符".to_string());
+        }
+
+        // 验证Cron表达式
+        if let Err(e) = cron::Schedule::from_str(&self.schedule) {
+            return Err(format!("无效的Cron表达式: {}", e));
+        }
+
+        // 验证超时时间
+        if let Some(timeout) = self.timeout_seconds {
+            if timeout <= 0 {
+                return Err("超时时间必须大于0".to_string());
+            }
+            if timeout > 3600 {
+                return Err("超时时间不能超过3600秒".to_string());
+            }
+        }
+
+        // 验证最大重试次数
+        if let Some(max_retries) = self.max_retries {
+            if max_retries < 0 {
+                return Err("最大重试次数不能小于0".to_string());
+            }
+            if max_retries > 10 {
+                return Err("最大重试次数不能超过10次".to_string());
+            }
+        }
+
+        // 验证任务类型
+        let task_type = match self.task_type.as_deref() {
+            Some("http") => {
+                if self.url.is_none() || self.url.as_ref().unwrap().is_empty() {
+                    return Err("HTTP任务必须提供URL".to_string());
+                }
+                TaskType::Http
+            }
+            _ => {
+                if self.command.is_none() || self.command.as_ref().unwrap().is_empty() {
+                    return Err("命令任务必须提供命令".to_string());
+                }
+                TaskType::Command
+            }
+        };
+
         let dependency_ids: Vec<ObjectId> = self
             .dependency_ids
             .iter()
             .filter_map(|id| ObjectId::parse_str(id).ok())
             .collect();
-
-        let task_type = match self.task_type.as_deref() {
-            Some("http") => TaskType::Http,
-            _ => TaskType::Command,
-        };
 
         let payload = if task_type == TaskType::Http {
             TaskPayload::Http {
@@ -327,14 +379,6 @@ impl<T> ApiResponse<T> {
             message: None,
         }
     }
-
-    pub fn error(message: String) -> Self {
-        Self {
-            success: false,
-            data: None,
-            message: Some(message),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -359,50 +403,6 @@ pub fn parse_object_ids(ids: &[String]) -> Vec<ObjectId> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TaskInstanceFilter {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub task_id: Option<ObjectId>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<TaskStatus>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub executor_id: Option<String>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        with = "bson::serde_helpers::chrono_datetime_as_bson_datetime_optional"
-    )]
-    pub start_after: Option<DateTime<Utc>>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        with = "bson::serde_helpers::chrono_datetime_as_bson_datetime_optional"
-    )]
-    pub start_before: Option<DateTime<Utc>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExecutionLogFilter {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub task_id: Option<ObjectId>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<TaskStatus>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub triggered_by: Option<TriggeredBy>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        with = "bson::serde_helpers::chrono_datetime_as_bson_datetime_optional"
-    )]
-    pub end_after: Option<DateTime<Utc>>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        with = "bson::serde_helpers::chrono_datetime_as_bson_datetime_optional"
-    )]
-    pub end_before: Option<DateTime<Utc>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClusterNode {
     pub node_name: String,
     pub node_id: String,
@@ -421,4 +421,26 @@ pub struct ClusterResponse {
     pub nodes: Vec<ClusterNode>,
     pub total_nodes: u64,
     pub active_nodes: u64,
+}
+
+/// 登录请求
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct LoginRequest {
+    pub username: String,
+    pub password: String,
+}
+
+/// 登录响应
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct LoginResponse {
+    pub status: String,
+    pub message: String,
+    pub user: UserInfo,
+}
+
+/// 用户信息
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct UserInfo {
+    pub username: String,
+    pub role: String,
 }

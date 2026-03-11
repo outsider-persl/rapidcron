@@ -35,16 +35,35 @@ db.tasks.createIndex(
 db.tasks.createIndex({ deleted_at: 1 });
 
 // 插入测试数据
-var taskData = {
+var taskData1 = {
   _id: ObjectId("670000000000000000000001"),
-  name: "Test Simple Executor",
+  name: "Test Success Task",
   description: "每10秒调用一次 simple-executor 的测试接口",
   dependency_ids: [],
   type: "http",
   schedule: "*/10 * * * * *",
   enabled: true,
   payload: {
-    url: "http://127.0.0.1:3000/execute",
+    url: "http://127.0.0.1:8081/execute",
+    method: "GET"
+  },
+  timeout_seconds: NumberInt(30),
+  max_retries: NumberInt(3),
+  created_at: new Date(),
+  updated_at: new Date(),
+  deleted_at: null
+};
+
+var taskData2 = {
+  _id: ObjectId("670000000000000000000002"),
+  name: "Test Error Task",
+  description: "每15秒调用一次会抛出错误的接口",
+  dependency_ids: [],
+  type: "http",
+  schedule: "*/15 * * * * *",
+  enabled: true,
+  payload: {
+    url: "http://127.0.0.1:8081/error",
     method: "GET"
   },
   timeout_seconds: NumberInt(30),
@@ -55,8 +74,11 @@ var taskData = {
 };
 
 print("插入测试数据...");
-db.tasks.insertOne(taskData);
+db.tasks.insertOne(taskData1);
+db.tasks.insertOne(taskData2);
 print("✓ 测试数据已插入");
+print("  - 任务1: Test Success Task (每10秒执行一次)");
+print("  - 任务2: Test Error Task (每15秒执行一次，会抛出错误)");
 
 // ======================
 // 2. task_instances 集合

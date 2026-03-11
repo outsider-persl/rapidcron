@@ -5,30 +5,20 @@ use std::fs;
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     pub server: ServerConfig,
-    pub logging: LoggingConfig,
     pub database: DatabaseConfig,
     pub rabbitmq: RabbitMQConfig,
     pub etcd: EtcdConfig,
     pub dispatcher: DispatcherConfig,
     pub retry: RetryConfig,
-    pub metrics: MetricsConfig,
+    pub logging: LoggingConfig,
     pub service: ServiceConfig,
+    pub auth: AuthConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ServerConfig {
-    pub name: String,
     pub host: String,
     pub http_port: u16,
-    pub grpc_port: u16,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct LoggingConfig {
-    pub level: String,
-    pub format: String,
-    pub output: String,
-    pub log_file: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -53,15 +43,12 @@ pub struct EtcdConfig {
     pub host: String,
     pub port: u16,
     pub service_prefix: String,
-    pub heartbeat_interval_secs: u64,
-    pub offline_threshold_secs: u64,
     pub dead_threshold_secs: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct DispatcherConfig {
     pub scan_interval_secs: u64,
-    pub max_concurrent_tasks: usize,
     pub log_retention_days: u32,
 }
 
@@ -76,15 +63,24 @@ pub struct RetryConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct MetricsConfig {
-    pub enabled: bool,
-    pub port: u16,
+pub struct LoggingConfig {
+    pub level: String,
+    pub format: String,
+    pub output: String,
+    pub log_file: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ServiceConfig {
     pub service_name: String,
     pub metadata: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AuthConfig {
+    pub username: String,
+    pub password: String,
+    pub role: String,
 }
 
 pub fn load(path: &str) -> Result<Config> {

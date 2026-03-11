@@ -28,7 +28,7 @@
 
 ### 1. 获取统计信息
 
-**接口地址**: `GET /stats`
+**接口地址**: `GET /tasks/stats`
 
 **描述**: 获取系统统计信息，包括任务总数、实例总数等
 
@@ -58,20 +58,22 @@
 
 **接口地址**: `GET /tasks`
 
-**描述**: 分页获取任务列表，支持按启用状态筛选
+**描述**: 分页获取任务列表，支持按启用状态、名称、任务类型筛选
 
 **请求参数**:
 
-| 参数名 | 类型 | 必填 | 默认值 | 描述 |
-|--------|------|--------|----------|------|
-| enabled | boolean | 否 | - | 是否只返回启用的任务 |
-| page | integer | 否 | 1 | 页码 |
-| page_size | integer | 否 | 20 | 每页数量 |
+| 参数名    | 类型    | 必填 | 默认值 | 描述                 |
+| --------- | ------- | ---- | ------ | -------------------- |
+| enabled   | boolean | 否   | -      | 是否只返回启用的任务 |
+| name      | string  | 否   | -      | 任务名称（模糊查询） |
+| task_type | string  | 否   | -      | 任务类型（command/http） |
+| page      | integer | 否   | 1      | 页码                 |
+| page_size | integer | 否   | 20     | 每页数量             |
 
 **请求示例**:
 
 ```bash
-GET /api/tasks?enabled=true&page=1&page_size=20
+GET /api/tasks?enabled=true&name=test&page=1&page_size=20
 ```
 
 **响应示例**:
@@ -117,18 +119,18 @@ GET /api/tasks?enabled=true&page=1&page_size=20
 
 **请求参数**:
 
-| 参数名 | 类型 | 必填 | 描述 |
-|--------|------|--------|------|
-| name | string | 是 | 任务名称 |
-| description | string | 否 | 任务描述 |
-| schedule | string | 是 | Cron 表达式（6 字段：秒 分 时 日 月 周） |
-| task_type | string | 否 | 任务类型（command/http） |
-| command | string | 否 | 命令（当 task_type 为 command 时使用） |
-| url | string | 否 | URL（当 task_type 为 http 时使用） |
-| enabled | boolean | 否 | 是否启用 |
-| timeout_seconds | integer | 否 | 超时时间（秒） |
-| max_retries | integer | 否 | 最大重试次数 |
-| dependency_ids | array | 否 | 依赖任务 ID 列表 |
+| 参数名          | 类型    | 必填 | 描述                                     |
+| --------------- | ------- | ---- | ---------------------------------------- |
+| name            | string  | 是   | 任务名称                                 |
+| description     | string  | 否   | 任务描述                                 |
+| schedule        | string  | 是   | Cron 表达式（6 字段：秒 分 时 日 月 周） |
+| task_type       | string  | 否   | 任务类型（command/http）                 |
+| command         | string  | 否   | 命令（当 task_type 为 command 时使用）   |
+| url             | string  | 否   | URL（当 task_type 为 http 时使用）       |
+| enabled         | boolean | 否   | 是否启用                                 |
+| timeout_seconds | integer | 否   | 超时时间（秒）                           |
+| max_retries     | integer | 否   | 最大重试次数                             |
+| dependency_ids  | array   | 否   | 依赖任务 ID 列表                         |
 
 **请求示例**:
 
@@ -181,9 +183,9 @@ GET /api/tasks?enabled=true&page=1&page_size=20
 
 **路径参数**:
 
-| 参数名 | 类型 | 必填 | 描述 |
-|--------|------|--------|------|
-| id | string | 是 | 任务 ID |
+| 参数名 | 类型   | 必填 | 描述    |
+| ------ | ------ | ---- | ------- |
+| id     | string | 是   | 任务 ID |
 
 **请求示例**:
 
@@ -226,9 +228,9 @@ GET /api/tasks/507f1f77bcf86cd799439011
 
 **路径参数**:
 
-| 参数名 | 类型 | 必填 | 描述 |
-|--------|------|--------|------|
-| id | string | 是 | 任务 ID |
+| 参数名 | 类型   | 必填 | 描述    |
+| ------ | ------ | ---- | ------- |
+| id     | string | 是   | 任务 ID |
 
 **请求参数**: 同创建任务（所有参数都是可选的）
 
@@ -253,9 +255,9 @@ GET /api/tasks/507f1f77bcf86cd799439011
 
 **路径参数**:
 
-| 参数名 | 类型 | 必填 | 描述 |
-|--------|------|--------|------|
-| id | string | 是 | 任务 ID |
+| 参数名 | 类型   | 必填 | 描述    |
+| ------ | ------ | ---- | ------- |
+| id     | string | 是   | 任务 ID |
 
 **请求示例**:
 
@@ -283,9 +285,9 @@ DELETE /api/tasks/507f1f77bcf86cd799439011
 
 **路径参数**:
 
-| 参数名 | 类型 | 必填 | 描述 |
-|--------|------|--------|------|
-| id | string | 是 | 任务 ID |
+| 参数名 | 类型   | 必填 | 描述    |
+| ------ | ------ | ---- | ------- |
+| id     | string | 是   | 任务 ID |
 
 **请求示例**:
 
@@ -313,9 +315,9 @@ POST /api/tasks/507f1f77bcf86cd799439011/enable
 
 **路径参数**:
 
-| 参数名 | 类型 | 必填 | 描述 |
-|--------|------|--------|------|
-| id | string | 是 | 任务 ID |
+| 参数名 | 类型   | 必填 | 描述    |
+| ------ | ------ | ---- | ------- |
+| id     | string | 是   | 任务 ID |
 
 **请求示例**:
 
@@ -343,15 +345,15 @@ POST /api/tasks/507f1f77bcf86cd799439011/disable
 
 **路径参数**:
 
-| 参数名 | 类型 | 必填 | 描述 |
-|--------|------|--------|------|
-| id | string | 是 | 任务 ID |
+| 参数名 | 类型   | 必填 | 描述    |
+| ------ | ------ | ---- | ------- |
+| id     | string | 是   | 任务 ID |
 
 **请求参数**:
 
-| 参数名 | 类型 | 必填 | 描述 |
-|--------|------|--------|------|
-| scheduled_time | integer | 否 | 计划执行时间（Unix 时间戳），为空则立即执行 |
+| 参数名         | 类型    | 必填 | 描述                                        |
+| -------------- | ------- | ---- | ------------------------------------------- |
+| scheduled_time | integer | 否   | 计划执行时间（Unix 时间戳），为空则立即执行 |
 
 **请求示例**:
 
@@ -386,23 +388,23 @@ POST /api/tasks/507f1f77bcf86cd799439011/disable
 
 ### 10. 获取任务实例列表
 
-**接口地址**: `GET /instances`
+**接口地址**: `GET /tasks/instances`
 
 **描述**: 分页获取任务实例列表，支持按任务 ID 和状态筛选
 
 **请求参数**:
 
-| 参数名 | 类型 | 必填 | 默认值 | 描述 |
-|--------|------|--------|----------|------|
-| task_id | string | 否 | - | 任务 ID |
-| status | string | 否 | - | 任务状态（pending/running/success/failed/cancelled） |
-| page | integer | 否 | 1 | 页码 |
-| page_size | integer | 否 | 20 | 每页数量 |
+| 参数名    | 类型    | 必填 | 默认值 | 描述                                                 |
+| --------- | ------- | ---- | ------ | ---------------------------------------------------- |
+| task_id   | string  | 否   | -      | 任务 ID                                              |
+| status    | string  | 否   | -      | 任务状态（pending/running/success/failed/cancelled） |
+| page      | integer | 否   | 1      | 页码                                                 |
+| page_size | integer | 否   | 20     | 每页数量                                             |
 
 **请求示例**:
 
 ```bash
-GET /api/instances?status=success&page=1&page_size=20
+GET /api/tasks/instances?status=success&page=1&page_size=20
 ```
 
 **响应示例**:
@@ -442,20 +444,20 @@ GET /api/instances?status=success&page=1&page_size=20
 
 ### 11. 获取任务实例详情
 
-**接口地址**: `GET /instances/{id}`
+**接口地址**: `GET /tasks/instances/{id}`
 
 **描述**: 根据实例 ID 获取任务实例详细信息
 
 **路径参数**:
 
-| 参数名 | 类型 | 必填 | 描述 |
-|--------|------|--------|------|
-| id | string | 是 | 实例 ID |
+| 参数名 | 类型   | 必填 | 描述    |
+| ------ | ------ | ---- | ------- |
+| id     | string | 是   | 实例 ID |
 
 **请求示例**:
 
 ```bash
-GET /api/instances/507f1f77bcf86cd799439012
+GET /api/tasks/instances/507f1f77bcf86cd799439012
 ```
 
 **响应示例**: 同获取任务实例列表中的单个实例
@@ -464,7 +466,7 @@ GET /api/instances/507f1f77bcf86cd799439012
 
 ### 12. 获取集群信息
 
-**接口地址**: `GET /clusters`
+**接口地址**: `GET /clusters/info`
 
 **描述**: 获取所有集群节点信息，包括节点名称、状态、CPU、内存和活跃任务数
 
@@ -473,7 +475,7 @@ GET /api/instances/507f1f77bcf86cd799439012
 **请求示例**:
 
 ```bash
-GET /api/clusters
+GET /api/clusters/info
 ```
 
 **响应示例**:
@@ -517,26 +519,125 @@ GET /api/clusters
 
 **响应字段说明**:
 
-| 字段名 | 类型 | 描述 |
-|--------|------|------|
-| nodes | array | 节点列表 |
-| total_nodes | integer | 总节点数 |
+| 字段名       | 类型    | 描述       |
+| ------------ | ------- | ---------- |
+| nodes        | array   | 节点列表   |
+| total_nodes  | integer | 总节点数   |
 | active_nodes | integer | 活跃节点数 |
 
 **节点信息字段说明**:
 
-| 字段名 | 类型 | 描述 |
-|--------|------|------|
-| node_name | string | 节点名称 |
-| node_id | string | 节点 ID |
-| host | string | 主机地址 |
-| port | integer | 端口号 |
-| status | string | 节点状态（active/inactive） |
-| cpu_usage | float | CPU 使用率（百分比） |
-| memory_usage | float | 内存使用量（GB） |
-| memory_total | integer | 内存总量（GB） |
-| active_tasks | integer | 活跃任务数 |
-| metadata | string | 元数据 |
+| 字段名       | 类型    | 描述                        |
+| ------------ | ------- | --------------------------- |
+| node_name    | string  | 节点名称                    |
+| node_id      | string  | 节点 ID                     |
+| host         | string  | 主机地址                    |
+| port         | integer | 端口号                      |
+| status       | string  | 节点状态（active/inactive） |
+| cpu_usage    | float   | CPU 使用率（百分比）        |
+| memory_usage | float   | 内存使用量（GB）            |
+| memory_total | integer | 内存总量（GB）              |
+| active_tasks | integer | 活跃任务数                  |
+| metadata     | string  | 元数据                      |
+
+---
+
+### 13. 获取执行日志列表
+
+**接口地址**: `GET /tasks/logs`
+
+**描述**: 分页获取执行日志列表，支持按任务ID、实例ID、状态和触发方式筛选
+
+**请求参数**:
+
+| 参数名       | 类型    | 必填 | 默认值 | 描述                                                 |
+| ------------ | ------- | ---- | ------ | ---------------------------------------------------- |
+| task_id      | string  | 否   | -      | 任务 ID                                              |
+| instance_id  | string  | 否   | -      | 实例 ID                                              |
+| status       | string  | 否   | -      | 任务状态（pending/running/success/failed/cancelled） |
+| triggered_by | string  | 否   | -      | 触发方式（scheduler/manual）                         |
+| page         | integer | 否   | 1      | 页码                                                 |
+| page_size    | integer | 否   | 20     | 每页数量                                             |
+
+**请求示例**:
+
+```bash
+GET /api/tasks/logs?status=failed&page=1&page_size=20
+```
+
+**响应示例**:
+
+```json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "_id": "69b1121135cf369be666ca8b",
+        "task_id": "670000000000000000000002",
+        "task_name": "Test Error Task",
+        "instance_id": "69b1120e9ea2fa76dc90516f",
+        "scheduled_time": "2026-03-11T07:02:57.250Z",
+        "start_time": "2026-03-11T07:02:57.250Z",
+        "end_time": "2026-03-11T07:02:57.255Z",
+        "status": "failed",
+        "duration_ms": 5,
+        "output_summary": "HTTP 500 Internal Server Error 失败",
+        "error_message": "HTTP 错误: 500 Internal Server Error",
+        "triggered_by": "scheduler"
+      }
+    ],
+    "total": 100,
+    "page": 1,
+    "page_size": 20,
+    "total_pages": 5
+  },
+  "message": null
+}
+```
+
+---
+
+### 14. 获取执行日志详情
+
+**接口地址**: `GET /tasks/logs/{id}`
+
+**描述**: 根据日志 ID 获取执行日志详细信息
+
+**路径参数**:
+
+| 参数名 | 类型   | 必填 | 描述        |
+| ------ | ------ | ---- | ----------- |
+| id     | string | 是   | 执行日志 ID |
+
+**请求示例**:
+
+```bash
+GET /api/tasks/logs/69b1121135cf369be666ca8b
+```
+
+**响应示例**:
+
+```json
+{
+  "success": true,
+  "data": {
+    "_id": "69b1121135cf369be666ca8b",
+    "task_id": "670000000000000000000002",
+    "task_name": "Test Error Task",
+    "instance_id": "69b1120e9ea2fa76dc90516f",
+    "scheduled_time": "2026-03-11T07:02:57.250Z",
+    "start_time": "2026-03-11T07:02:57.250Z",
+    "end_time": "2026-03-11T07:02:57.255Z",
+    "status": "failed",
+    "duration_ms": 5,
+    "output_summary": "HTTP 500 Internal Server Error 失败",
+    "error_message": "HTTP 错误: 500 Internal Server Error",
+    "triggered_by": "scheduler"
+  },
+  "message": null
+}
+```
 
 ---
 
@@ -544,42 +645,59 @@ GET /api/clusters
 
 ### Task（任务）
 
-| 字段名 | 类型 | 描述 |
-|--------|------|------|
-| _id | string | 任务 ID |
-| name | string | 任务名称 |
-| description | string | 任务描述 |
-| type | string | 任务类型（command/http） |
-| schedule | string | Cron 表达式（6 字段：秒 分 时 日 月 周） |
-| enabled | boolean | 是否启用 |
-| payload | object | 任务载荷 |
-| timeout_seconds | integer | 超时时间（秒） |
-| max_retries | integer | 最大重试次数 |
-| created_at | string | 创建时间 |
-| updated_at | string | 更新时间 |
+| 字段名          | 类型    | 描述                                     |
+| --------------- | ------- | ---------------------------------------- |
+| _id             | string  | 任务 ID                                  |
+| name            | string  | 任务名称                                 |
+| description     | string  | 任务描述                                 |
+| type            | string  | 任务类型（command/http）                 |
+| schedule        | string  | Cron 表达式（6 字段：秒 分 时 日 月 周） |
+| enabled         | boolean | 是否启用                                 |
+| payload         | object  | 任务载荷                                 |
+| timeout_seconds | integer | 超时时间（秒）                           |
+| max_retries     | integer | 最大重试次数                             |
+| created_at      | string  | 创建时间                                 |
+| updated_at      | string  | 更新时间                                 |
 
 ### TaskInstance（任务实例）
 
-| 字段名 | 类型 | 描述 |
-|--------|------|------|
-| _id | string | 实例 ID |
-| task_id | string | 任务 ID |
-| scheduled_time | string | 计划执行时间 |
-| status | string | 实例状态（pending/running/success/failed/cancelled） |
-| executor_id | string | 执行器 ID |
-| start_time | string | 开始执行时间 |
-| end_time | string | 结束执行时间 |
-| retry_count | integer | 重试次数 |
-| result | object | 执行结果 |
-| created_at | string | 创建时间 |
+| 字段名         | 类型    | 描述                                                 |
+| -------------- | ------- | ---------------------------------------------------- |
+| _id            | string  | 实例 ID                                              |
+| task_id        | string  | 任务 ID                                              |
+| scheduled_time | string  | 计划执行时间                                         |
+| status         | string  | 实例状态（pending/running/success/failed/cancelled） |
+| executor_id    | string  | 执行器 ID                                            |
+| start_time     | string  | 开始执行时间                                         |
+| end_time       | string  | 结束执行时间                                         |
+| retry_count    | integer | 重试次数                                             |
+| result         | object  | 执行结果                                             |
+| created_at     | string  | 创建时间                                             |
 
 ### ExecutionResult（执行结果）
 
-| 字段名 | 类型 | 描述 |
-|--------|------|------|
-| output | string | 输出内容 |
-| error | string | 错误信息 |
-| exit_code | integer | 退出码 |
+| 字段名    | 类型    | 描述     |
+| --------- | ------- | -------- |
+| output    | string  | 输出内容 |
+| error     | string  | 错误信息 |
+| exit_code | integer | 退出码   |
+
+### ExecutionLog（执行日志）
+
+| 字段名         | 类型    | 描述                                                 |
+| -------------- | ------- | ---------------------------------------------------- |
+| _id            | string  | 日志 ID                                              |
+| task_id        | string  | 任务 ID                                              |
+| task_name      | string  | 任务名称                                             |
+| instance_id    | string  | 实例 ID                                              |
+| scheduled_time | string  | 计划执行时间                                         |
+| start_time     | string  | 开始执行时间                                         |
+| end_time       | string  | 结束执行时间                                         |
+| status         | string  | 执行状态（pending/running/success/failed/cancelled） |
+| duration_ms    | integer | 执行时长（毫秒）                                     |
+| output_summary | string  | 输出摘要                                             |
+| error_message  | string  | 错误消息                                             |
+| triggered_by   | string  | 触发方式（scheduler/manual）                         |
 
 ---
 
@@ -592,26 +710,24 @@ RapidCron 使用标准的 6 字段 Cron 表达式：
 *  *  *  *  *  *
 ```
 
-### 示例
-
-| 表达式 | 描述 |
-|--------|------|
-| `0/5 * * * * *` | 每 5 秒执行一次 |
+| 表达式           | 描述               |
+| ---------------- | ------------------ |
+| `0/5 * * * * *`  | 每 5 秒执行一次    |
 | `0 */10 * * * *` | 每 10 分钟执行一次 |
-| `0 0 * * * *` | 每小时执行一次 |
-| `0 0 0 * * *` | 每天执行一次 |
-| `0 0 0 * * 1` | 每周一执行一次 |
-| `0 0 0 1 * *` | 每月 1 号执行一次 |
+| `0 0 * * * *`    | 每小时执行一次     |
+| `0 0 0 * * *`    | 每天执行一次       |
+| `0 0 0 * * 1`    | 每周一执行一次     |
+| `0 0 0 1 * *`    | 每月 1 号执行一次  |
 
 ---
 
 ## 错误码
 
-| 错误码 | 描述 |
-|--------|------|
-| 400 | 请求参数错误 |
-| 404 | 资源不存在 |
-| 500 | 服务器内部错误 |
+| 错误码 | 描述           |
+| ------ | -------------- |
+| 400    | 请求参数错误   |
+| 404    | 资源不存在     |
+| 500    | 服务器内部错误 |
 
 ---
 

@@ -1,3 +1,3 @@
 pub mod etcd;
 
-pub use etcd::{EtcdManager, ServiceInfo, ServiceRegistry};
+pub use etcd::{EtcdManager, ServiceInfo};

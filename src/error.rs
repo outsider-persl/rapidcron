@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 use axum::{
     Json,
     http::StatusCode,
@@ -9,9 +8,6 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Configuration error: {0}")]
-    Config(String),
-
     #[error("Database error: {0}")]
     Database(String),
 
@@ -26,9 +22,6 @@ pub enum Error {
 
     #[error("Task execution error: {0}")]
     Execution(String),
-
-    #[error("Network error: {0}")]
-    Network(String),
 
     #[error("Validation error: {0}")]
     Validation(String),
@@ -50,12 +43,6 @@ pub enum Error {
 
     #[error("Message queue error: {0}")]
     MessageQueue(String),
-
-    #[error("Service registration error: {0}")]
-    ServiceRegistration(String),
-
-    #[error("Distributed lock error: {0}")]
-    DistributedLock(String),
 }
 
 #[derive(Serialize)]
@@ -70,21 +57,16 @@ impl IntoResponse for Error {
             Error::Validation(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
             Error::Execution(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
             Error::Database(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
-            Error::Config(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
             Error::Serialization(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.to_string()),
             Error::Io(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.to_string()),
             Error::Scheduling(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
-            Error::Network(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
             Error::CronFieldCount(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
             Error::CronSyntax(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
             Error::CronTimeRange(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
             Error::CronInternal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
             Error::Etcd(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
             Error::MessageQueue(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
-            Error::ServiceRegistration(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
-            Error::DistributedLock(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
         };
-
         let body = Json(ErrorResponse {
             success: false,
             message,

@@ -14,25 +14,24 @@ use coord::ServiceInfo;
 use executor::TaskQueue;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::Mutex;
 use tokio::time::interval;
 use tower_http::cors::CorsLayer;
-use tracing::{debug, error, info};
+use tracing::{error, info};
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let cfg = config::load("config.toml")?;
     logging::init(&cfg.logging)?;
-    info!("configuration loaded");
+    info!("[Main] configuration loaded");
 
     let db = Arc::new(storage::mongo::MongoDataSource::new(&cfg.database).await?);
-    info!("mongodb connection established");
+    info!("[Main] mongodb connection established");
 
     let etcd_endpoints = vec![format!("{}:{}", cfg.etcd.host, cfg.etcd.port)];
     let etcd_manager =
         coord::EtcdManager::new_with_prefix(etcd_endpoints, cfg.etcd.service_prefix.clone())
             .await?;
-    info!("etcd connection established");
+    info!("[Main] etcd connection established");
 
     let etcd_manager = Arc::new(etcd_manager);
 
@@ -61,16 +60,8 @@ async fn main() -> Result<()> {
         cfg.rabbitmq.username, cfg.rabbitmq.password, cfg.rabbitmq.host, cfg.rabbitmq.port
     );
 
-    let task_queue = Arc::new(
-        TaskQueue::new(
-            &amqp_url,
-            cfg.rabbitmq.queue_name.clone(),
-            cfg.service.service_name.clone(),
-            cfg.dispatcher.max_concurrent_tasks,
-        )
-        .await?,
-    );
-    info!("rabbitmq task queue initialized");
+    let task_queue = Arc::new(TaskQueue::new(&amqp_url, cfg.rabbitmq.queue_name.clone()).await?);
+    info!("[Main] rabbitmq task queue initialized");
 
     let dispatcher = scheduler::dispatcher::Dispatcher::new(
         Arc::clone(&db),
@@ -79,10 +70,12 @@ async fn main() -> Result<()> {
         cfg.dispatcher.log_retention_days,
     );
     dispatcher.start().await?;
-    info!("task dispatcher started");
+    info!("[Main] task dispatcher started");
 
-    let retry_manager = executor::retry_logic::RetryManager::new(Arc::clone(&db));
-    info!("retry manager initialized");
+    let retry_config = cfg.retry.clone();
+    let retry_manager =
+        executor::RetryManager::new(Arc::clone(&db), Arc::clone(&task_queue), retry_config);
+    info!("[Main] retry manager initialized");
 
     tokio::spawn(async move {
         let mut timer = interval(Duration::from_secs(cfg.retry.scan_interval_secs));
@@ -94,18 +87,23 @@ async fn main() -> Result<()> {
             {
                 Ok(count) => {
                     if count > 0 {
-                        info!("安排了 {} 个失败任务重试", count);
+                        info!("[RetryScheduler] 安排了 {} 个失败任务重试", count);
                     }
                 }
                 Err(e) => {
-                    error!("重试失败任务时出错: {}", e);
+                    error!("[RetryScheduler] 重试失败任务时出错: {}", e);
                 }
             }
         }
     });
-    info!("retry scheduler started");
+    info!("[Main] retry scheduler started");
 
-    let api_router = api::create_router_with_etcd((*db).clone(), etcd_manager.clone());
+    let api_router = api::create_router_with_etcd(
+        (*db).clone(),
+        etcd_manager.clone(),
+        task_queue.clone(),
+        cfg.auth,
+    );
 
     let app = Router::new()
         .nest("/api", api_router)
@@ -115,7 +113,7 @@ async fn main() -> Result<()> {
         tokio::net::TcpListener::bind(format!("{}:{}", cfg.server.host, cfg.server.http_port))
             .await?;
     info!(
-        "API server listening on http://{}:{}",
+        "[Main] API server listening on http://{}:{}",
         cfg.server.host, cfg.server.http_port
     );
 
@@ -124,24 +122,24 @@ async fn main() -> Result<()> {
     });
 
     info!(
-        "RapidCron server is running on http://{}:{}",
+        "[Main] RapidCron server is running on http://{}:{}",
         cfg.server.host, cfg.server.http_port
     );
 
     tokio::signal::ctrl_c().await?;
-    info!("RapidCron server is shutting down...");
+    info!("[Main] RapidCron server is shutting down...");
 
     dispatcher.stop().await?;
-    info!("dispatcher stopped");
+    info!("[Main] dispatcher stopped");
 
     etcd_manager
         .registry()
         .await
         .deregister(&service_info.service_name)
         .await?;
-    info!("service deregistered");
+    info!("[Main] service deregistered");
 
-    info!("RapidCron server shutdown complete");
+    info!("[Main] RapidCron server shutdown complete");
 
     Ok(())
 }
