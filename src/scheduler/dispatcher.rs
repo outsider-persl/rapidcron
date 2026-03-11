@@ -5,10 +5,13 @@ use crate::storage::mongo::MongoDataSource;
 use crate::types::{DispatchLog, Task, TaskInstance, TaskStatus};
 use chrono::{DateTime, Utc};
 use mongodb::bson::{doc, oid::ObjectId};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
+
+type TaskInstanceMap = HashMap<ObjectId, HashSet<i64>>;
 
 /// 任务分发器
 pub struct Dispatcher {
@@ -66,6 +69,8 @@ impl Dispatcher {
         }
 
         // 启动时做一次全局去重，与上次扫描时间无关
+        // 注意：即使恢复了 last_scan_end_time，启动去重是"全局 pending 去重"，与时间窗口无关
+        // 这是为了清理所有状态为 pending 的重复实例，避免重启后出现重复执行
         if let Err(e) = Self::check_and_dedup_instances(&self.db).await {
             error!("[Dispatcher] 启动去重失败: {}", e);
         }
@@ -84,7 +89,14 @@ impl Dispatcher {
             while *running_flag.read().await {
                 timer.tick().await;
 
-                match Self::scan_and_dispatch(&db, &task_queue, scan_interval_secs, &last_scan_end_time).await {
+                match Self::scan_and_dispatch(
+                    &db,
+                    &task_queue,
+                    scan_interval_secs,
+                    &last_scan_end_time,
+                )
+                .await
+                {
                     Ok(_) => {}
                     Err(e) => {
                         error!("[Dispatcher] 任务分发失败: {}", e);
@@ -119,6 +131,23 @@ impl Dispatcher {
         Ok(())
     }
 
+    /// 计算扫描窗口并更新上次扫描结束时间
+    async fn calculate_scan_window(
+        now: DateTime<Utc>,
+        scan_interval_secs: u64,
+        last_scan_end_time: &Arc<RwLock<DateTime<Utc>>>,
+    ) -> (DateTime<Utc>, DateTime<Utc>) {
+        let scan_window = chrono::Duration::seconds(scan_interval_secs as i64);
+
+        let mut last_end = last_scan_end_time.write().await;
+        let scan_window_start = *last_end;
+        let scan_window_end = now + scan_window;
+        *last_end = scan_window_end;
+        drop(last_end);
+
+        (scan_window_start, scan_window_end)
+    }
+
     /// 扫描并分发任务
     async fn scan_and_dispatch(
         db: &Arc<MongoDataSource>,
@@ -127,17 +156,9 @@ impl Dispatcher {
         last_scan_end_time: &Arc<RwLock<DateTime<Utc>>>,
     ) -> Result<usize> {
         let now = Utc::now();
-        let scan_window = chrono::Duration::seconds(scan_interval_secs as i64);
 
-        // 获取上次扫描结束时间，避免窗口重叠
-        let scan_window_start;
-        let scan_window_end;
-        {
-            let mut last_end = last_scan_end_time.write().await;
-            scan_window_start = *last_end;
-            scan_window_end = now + scan_window;
-            *last_end = scan_window_end;
-        }
+        let (scan_window_start, scan_window_end) =
+            Self::calculate_scan_window(now, scan_interval_secs, last_scan_end_time).await;
 
         info!(
             "[Dispatcher] 开始扫描任务，窗口: {} 到 {}",
@@ -159,7 +180,7 @@ impl Dispatcher {
         let total_tasks = enabled_tasks.len() as i32;
 
         if enabled_tasks.is_empty() {
-            info!("[Dispatcher] 没有启用的任务");
+            debug!("[Dispatcher] 没有启用的任务");
 
             let dispatch_log = DispatchLog {
                 id: None,
@@ -198,10 +219,7 @@ impl Dispatcher {
         };
 
         // 按任务ID分组，存储已存在的调度时间
-        let mut existing_instances_map: std::collections::HashMap<
-            ObjectId,
-            std::collections::HashSet<i64>,
-        > = std::collections::HashMap::new();
+        let mut existing_instances_map: TaskInstanceMap = TaskInstanceMap::new();
         for instance in all_existing_instances {
             existing_instances_map
                 .entry(instance.task_id)
@@ -274,17 +292,12 @@ impl Dispatcher {
             .await
             .map_err(|e| Error::Database(format!("查询任务实例失败: {}", e)))?;
 
-        let mut existing_instances_map: std::collections::HashMap<
-            ObjectId,
-            std::collections::HashSet<i64>,
-        > = std::collections::HashMap::new();
+        let mut existing_instances_map: TaskInstanceMap = TaskInstanceMap::new();
         let mut removed_count = 0u64;
 
         for instance in all_existing_instances {
             let scheduled_ts = instance.scheduled_time.timestamp();
-            let entry = existing_instances_map
-                .entry(instance.task_id)
-                .or_default();
+            let entry = existing_instances_map.entry(instance.task_id).or_default();
 
             if entry.contains(&scheduled_ts) {
                 if let Some(id) = instance.id {
@@ -299,10 +312,17 @@ impl Dispatcher {
         }
 
         if removed_count > 0 {
-            info!(
-                "[Dispatcher] 启动去重完成，删除 {} 个重复的待执行任务实例",
-                removed_count
-            );
+            if removed_count > 1000 {
+                warn!(
+                    "[Dispatcher] 启动去重完成，删除 {} 个重复的待执行任务实例",
+                    removed_count
+                );
+            } else {
+                info!(
+                    "[Dispatcher] 启动去重完成，删除 {} 个重复的待执行任务实例",
+                    removed_count
+                );
+            }
         } else {
             info!("[Dispatcher] 启动去重完成，未发现重复的待执行任务实例");
         }
