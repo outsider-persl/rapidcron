@@ -1,6 +1,7 @@
 use axum::{Json, extract::State};
 use reqwest::Client;
 use std::sync::Arc;
+use sysinfo::System;
 
 use crate::{
     coord::EtcdManager,
@@ -83,13 +84,29 @@ pub async fn get_cluster_info(
             metadata: service.metadata.clone(),
         };
 
-        let executor_url = format!("http://{}:{}/node", service.host, service.port);
-        if let Ok(response) = client.get(&executor_url).send().await
-            && let Ok(node_info) = response.json::<ExecutorNodeInfo>().await
-        {
-            node.cpu_usage = node_info.cpu_usage;
-            node.memory_usage = node_info.memory_usage;
-            node.memory_total = node_info.memory_total;
+        if service.metadata.as_deref() == Some("executor") {
+            let executor_url = format!("http://{}:{}/node", service.host, service.port);
+            if let Ok(response) = client.get(&executor_url).send().await
+                && let Ok(node_info) = response.json::<ExecutorNodeInfo>().await
+            {
+                node.cpu_usage = node_info.cpu_usage;
+                node.memory_usage = node_info.memory_usage;
+                node.memory_total = node_info.memory_total;
+            }
+        } else if service.metadata.as_deref() == Some("dispatcher") {
+            let mut system = System::new_all();
+            system.refresh_all();
+
+            let cpu_usage = system.global_cpu_usage() as f64;
+            let total_memory = system.total_memory();
+            let used_memory = system.used_memory();
+
+            let memory_usage_percent = (used_memory as f64 / total_memory as f64) * 100.0;
+            let memory_total_gb = total_memory as f64 / 1024.0 / 1024.0 / 1024.0;
+
+            node.cpu_usage = cpu_usage;
+            node.memory_usage = memory_usage_percent;
+            node.memory_total = memory_total_gb as u64;
         }
 
         nodes.push(node);

@@ -1148,19 +1148,19 @@ pub async fn get_cluster_info(
 
 ## 参考文献
 
-[1] The Rust Programming Language. https://doc.rust-lang.org/book/
+[1] The Rust Programming Language. <https://doc.rust-lang.org/book/>
 
-[2] Tokio Documentation. https://tokio.rs/
+[2] Tokio Documentation. <https://tokio.rs/>
 
-[3] MongoDB Documentation. https://docs.mongodb.com/
+[3] MongoDB Documentation. <https://docs.mongodb.com/>
 
-[4] RabbitMQ Documentation. https://www.rabbitmq.com/
+[4] RabbitMQ Documentation. <https://www.rabbitmq.com/>
 
-[5] etcd Documentation. https://etcd.io/docs/
+[5] etcd Documentation. <https://etcd.io/docs/>
 
-[6] Axum Documentation. https://docs.rs/axum/
+[6] Axum Documentation. <https://docs.rs/axum/>
 
-[7] Cron Expression. https://en.wikipedia.org/wiki/Cron
+[7] Cron Expression. <https://en.wikipedia.org/wiki/Cron>
 
 [8] Designing Data-Intensive Applications. Martin Fowler.
 

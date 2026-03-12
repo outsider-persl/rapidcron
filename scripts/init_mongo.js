@@ -42,7 +42,7 @@ var taskData1 = {
   dependency_ids: [],
   type: "http",
   schedule: "*/10 * * * * *",
-  enabled: true,
+  enabled: false,
   payload: {
     url: "http://127.0.0.1:8081/execute",
     method: "GET"
@@ -61,7 +61,7 @@ var taskData2 = {
   dependency_ids: [],
   type: "http",
   schedule: "*/15 * * * * *",
-  enabled: true,
+  enabled: false,
   payload: {
     url: "http://127.0.0.1:8081/error",
     method: "GET"
