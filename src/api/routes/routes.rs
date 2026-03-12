@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::api::{
     ApiState,
-    handlers::{auth, clusters, tasks},
+    handlers::{auth, clusters, dispatch, execution, tasks},
 };
 use crate::config::AuthConfig;
 use crate::coord::EtcdManager;
@@ -23,8 +23,10 @@ pub fn create_router_with_etcd(
     let auth_state = auth::AuthState::new(auth_config);
 
     Router::new()
-        .nest("/tasks", task_routes(api_state))
+        .nest("/tasks", task_routes(api_state.clone()))
         .nest("/clusters", cluster_routes_with_etcd(cluster_api_state))
+        .nest("/execution", execution_routes(api_state.clone()))
+        .nest("/dispatch", dispatch_routes(api_state))
         .nest("/auth", auth_routes(auth_state))
 }
 
@@ -46,8 +48,6 @@ fn task_routes(state: ApiState) -> Router {
         .route("/:id/trigger", axum::routing::post(tasks::trigger_task))
         .route("/instances", axum::routing::get(tasks::list_instances))
         .route("/instances/:id", axum::routing::get(tasks::get_instance))
-        .route("/logs", axum::routing::get(tasks::list_execution_logs))
-        .route("/logs/:id", axum::routing::get(tasks::get_execution_log))
         .route("/stats", axum::routing::get(tasks::get_stats))
         .with_state(state)
 }
@@ -55,5 +55,22 @@ fn task_routes(state: ApiState) -> Router {
 fn cluster_routes_with_etcd(state: clusters::ClusterApiState) -> Router {
     Router::new()
         .route("/info", axum::routing::get(clusters::get_cluster_info))
+        .with_state(state)
+}
+
+fn dispatch_routes(state: ApiState) -> Router {
+    Router::new()
+        .route("/logs", axum::routing::get(dispatch::list_dispatch_logs))
+        .route("/logs/:id", axum::routing::get(dispatch::get_dispatch_log))
+        .with_state(state)
+}
+
+fn execution_routes(state: ApiState) -> Router {
+    Router::new()
+        .route("/logs", axum::routing::get(execution::list_execution_logs))
+        .route(
+            "/logs/:id",
+            axum::routing::get(execution::get_execution_log),
+        )
         .with_state(state)
 }

@@ -378,6 +378,7 @@ impl Dispatcher {
                 end_time: None,
                 retry_count: 0,
                 result: None,
+                triggered_by: crate::types::TriggeredBy::Scheduler,
                 created_at: *now,
             };
 
@@ -392,6 +393,7 @@ impl Dispatcher {
                 task_name: task.name.clone(),
                 scheduled_time: scheduled_timestamp,
                 retry_count: 0,
+                triggered_by: crate::types::TriggeredBy::Scheduler,
             };
 
             task_queue

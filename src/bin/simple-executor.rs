@@ -22,6 +22,7 @@ struct TaskMessage {
     task_id: mongodb::bson::oid::ObjectId,
     task_name: String,
     scheduled_time: i64,
+    triggered_by: TriggeredBy,
 }
 
 /// Simple Executor - 简单的任务执行器
@@ -434,7 +435,7 @@ async fn main() -> Result<()> {
                                             duration_ms,
                                             output_summary,
                                             error_message,
-                                            triggered_by: TriggeredBy::Scheduler,
+                                            triggered_by: task_msg.triggered_by,
                                         };
                                         if let Err(e) =
                                             state_clone.db.create_execution_log(execution_log).await
@@ -613,7 +614,7 @@ async fn node_info(State(state): State<Arc<ExecutorState>>) -> Json<NodeInfoResp
 
     drop(system);
 
-    let memory_usage_gb = used_memory as f64 / 1024.0 / 1024.0 / 1024.0;
+    let memory_usage_percent = (used_memory as f64 / total_memory as f64) * 100.0;
     let memory_total_gb = total_memory as f64 / 1024.0 / 1024.0 / 1024.0;
 
     Json(NodeInfoResponse {
@@ -623,7 +624,7 @@ async fn node_info(State(state): State<Arc<ExecutorState>>) -> Json<NodeInfoResp
         port: state.executor_port,
         status: "active".to_string(),
         cpu_usage,
-        memory_usage: memory_usage_gb,
+        memory_usage: memory_usage_percent,
         memory_total: memory_total_gb as u64,
         active_tasks: 0,
         metadata: Some("executor".to_string()),

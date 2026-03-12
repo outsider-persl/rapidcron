@@ -188,6 +188,12 @@ impl MongoDataSource {
         Ok(logs)
     }
 
+    pub async fn get_dispatch_log(&self, id: ObjectId) -> Result<Option<DispatchLog>> {
+        let collection = self.dispatch_logs();
+        let log = collection.find_one(doc! { "_id": id }).await?;
+        Ok(log)
+    }
+
     pub async fn get_last_dispatch_log(&self) -> Result<Option<DispatchLog>> {
         let collection = self.dispatch_logs();
         let mut cursor = collection

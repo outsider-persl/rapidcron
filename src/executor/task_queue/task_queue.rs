@@ -1,4 +1,5 @@
 use crate::error::{Error, Result};
+use crate::types::TriggeredBy;
 use lapin::{
     BasicProperties, Channel, Connection, ConnectionProperties,
     options::{BasicPublishOptions, QueueDeclareOptions},
@@ -16,6 +17,7 @@ pub struct TaskMessage {
     pub task_name: String,
     pub scheduled_time: i64,
     pub retry_count: i32,
+    pub triggered_by: TriggeredBy,
 }
 
 /// 任务队列

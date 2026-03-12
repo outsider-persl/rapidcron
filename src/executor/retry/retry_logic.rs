@@ -194,6 +194,7 @@ impl RetryManager {
             task_name: task.name.clone(),
             scheduled_time: retry_time.timestamp(),
             retry_count: retry_count + 1,
+            triggered_by: instance.triggered_by,
         };
 
         self.task_queue

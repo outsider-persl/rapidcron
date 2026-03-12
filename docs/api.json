@@ -533,7 +533,7 @@
         }
       }
     },
-    "/tasks/logs": {
+    "/execution/logs": {
       "get": {
         "summary": "获取执行日志列表",
         "description": "获取执行日志的列表，支持分页和过滤",
@@ -620,7 +620,7 @@
         }
       }
     },
-    "/tasks/logs/{id}": {
+    "/execution/logs/{id}": {
       "get": {
         "summary": "获取执行日志详情",
         "description": "根据ID获取执行日志的详细信息",
@@ -670,6 +670,117 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiResponseCluster"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dispatch/logs": {
+      "get": {
+        "summary": "获取分发日志列表",
+        "description": "获取分发日志的列表，支持分页和过滤",
+        "parameters": [
+          {
+            "name": "start_time",
+            "in": "query",
+            "required": false,
+            "description": "扫描开始时间（ISO 8601格式）",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "end_time",
+            "in": "query",
+            "required": false,
+            "description": "扫描结束时间（ISO 8601格式）",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "has_error",
+            "in": "query",
+            "required": false,
+            "description": "是否有错误",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "description": "页码",
+            "schema": {
+              "type": "integer",
+              "default": 1,
+              "minimum": 1
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "description": "每页数量",
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "minimum": 1,
+              "maximum": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponsePaginatedDispatchLog"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dispatch/logs/{id}": {
+      "get": {
+        "summary": "获取分发日志详情",
+        "description": "根据ID获取分发日志的详细信息",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "分发日志ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponseDispatchLog"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "分发日志不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponseError"
                 }
               }
             }
@@ -873,6 +984,14 @@
           "cancelled"
         ]
       },
+      "TriggeredBy": {
+        "type": "string",
+        "enum": [
+          "scheduler",
+          "manual"
+        ],
+        "description": "任务触发方式"
+      },
       "TaskPayload": {
         "oneOf": [
           {
@@ -1031,6 +1150,10 @@
           },
           "result": {
             "$ref": "#/components/schemas/ExecutionResult"
+          },
+          "triggered_by": {
+            "$ref": "#/components/schemas/TriggeredBy",
+            "description": "触发方式"
           },
           "created_at": {
             "type": "string",
@@ -1451,6 +1574,105 @@
           },
           "data": {
             "$ref": "#/components/schemas/PaginatedResponseExecutionLog"
+          },
+          "message": {
+            "type": "string",
+            "description": "消息"
+          }
+        }
+      },
+      "DispatchLog": {
+        "type": "object",
+        "properties": {
+          "_id": {
+            "type": "string",
+            "description": "日志ID"
+          },
+          "scan_time": {
+            "type": "string",
+            "format": "date-time",
+            "description": "扫描时间"
+          },
+          "scan_window_start": {
+            "type": "string",
+            "format": "date-time",
+            "description": "扫描窗口开始时间"
+          },
+          "scan_window_end": {
+            "type": "string",
+            "format": "date-time",
+            "description": "扫描窗口结束时间"
+          },
+          "total_tasks": {
+            "type": "integer",
+            "description": "总任务数"
+          },
+          "enabled_tasks": {
+            "type": "integer",
+            "description": "启用的任务数"
+          },
+          "dispatched_instances": {
+            "type": "integer",
+            "description": "分发的实例数"
+          },
+          "error_message": {
+            "type": "string",
+            "description": "错误消息"
+          }
+        }
+      },
+      "PaginatedResponseDispatchLog": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DispatchLog"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "description": "总数量"
+          },
+          "page": {
+            "type": "integer",
+            "description": "当前页码"
+          },
+          "page_size": {
+            "type": "integer",
+            "description": "每页数量"
+          },
+          "total_pages": {
+            "type": "integer",
+            "description": "总页数"
+          }
+        }
+      },
+      "ApiResponseDispatchLog": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "description": "是否成功"
+          },
+          "data": {
+            "$ref": "#/components/schemas/DispatchLog"
+          },
+          "message": {
+            "type": "string",
+            "description": "消息"
+          }
+        }
+      },
+      "ApiResponsePaginatedDispatchLog": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "description": "是否成功"
+          },
+          "data": {
+            "$ref": "#/components/schemas/PaginatedResponseDispatchLog"
           },
           "message": {
             "type": "string",

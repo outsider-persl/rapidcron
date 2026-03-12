@@ -91,6 +91,7 @@ db.task_instances.createIndex({ task_id: 1, scheduled_time: -1 });
 db.task_instances.createIndex({ status: 1 });
 db.task_instances.createIndex({ scheduled_time: 1 });
 db.task_instances.createIndex({ end_time: 1 });
+db.task_instances.createIndex({ triggered_by: 1, created_at: -1 });
 
 // ======================
 // 3. execution_logs 集合

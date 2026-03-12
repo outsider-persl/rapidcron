@@ -125,6 +125,8 @@ pub struct TaskInstance {
     pub retry_count: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<ExecutionResult>,
+    #[serde(rename = "triggered_by")]
+    pub triggered_by: TriggeredBy,
     #[serde(with = "bson::serde_helpers::chrono_datetime_as_bson_datetime")]
     pub created_at: DateTime<Utc>,
 }

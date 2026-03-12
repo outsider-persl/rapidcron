@@ -62,13 +62,13 @@
 
 **请求参数**:
 
-| 参数名    | 类型    | 必填 | 默认值 | 描述                 |
-| --------- | ------- | ---- | ------ | -------------------- |
-| enabled   | boolean | 否   | -      | 是否只返回启用的任务 |
-| name      | string  | 否   | -      | 任务名称（模糊查询） |
+| 参数名    | 类型    | 必填 | 默认值 | 描述                     |
+| --------- | ------- | ---- | ------ | ------------------------ |
+| enabled   | boolean | 否   | -      | 是否只返回启用的任务     |
+| name      | string  | 否   | -      | 任务名称（模糊查询）     |
 | task_type | string  | 否   | -      | 任务类型（command/http） |
-| page      | integer | 否   | 1      | 页码                 |
-| page_size | integer | 否   | 20     | 每页数量             |
+| page      | integer | 否   | 1      | 页码                     |
+| page_size | integer | 否   | 20     | 每页数量                 |
 
 **请求示例**:
 
@@ -492,7 +492,7 @@ GET /api/clusters/info
         "port": 8081,
         "status": "active",
         "cpu_usage": 45.5,
-        "memory_usage": 2.3,
+        "memory_usage": 28.75,
         "memory_total": 8,
         "active_tasks": 3,
         "metadata": "executor"
@@ -504,7 +504,7 @@ GET /api/clusters/info
         "port": 8082,
         "status": "active",
         "cpu_usage": 30.2,
-        "memory_usage": 1.8,
+        "memory_usage": 22.5,
         "memory_total": 8,
         "active_tasks": 1,
         "metadata": "executor"
@@ -535,7 +535,7 @@ GET /api/clusters/info
 | port         | integer | 端口号                      |
 | status       | string  | 节点状态（active/inactive） |
 | cpu_usage    | float   | CPU 使用率（百分比）        |
-| memory_usage | float   | 内存使用量（GB）            |
+| memory_usage | float   | 内存使用率（百分比）        |
 | memory_total | integer | 内存总量（GB）              |
 | active_tasks | integer | 活跃任务数                  |
 | metadata     | string  | 元数据                      |
@@ -544,7 +544,7 @@ GET /api/clusters/info
 
 ### 13. 获取执行日志列表
 
-**接口地址**: `GET /tasks/logs`
+**接口地址**: `GET /execution/logs`
 
 **描述**: 分页获取执行日志列表，支持按任务ID、实例ID、状态和触发方式筛选
 
@@ -562,7 +562,7 @@ GET /api/clusters/info
 **请求示例**:
 
 ```bash
-GET /api/tasks/logs?status=failed&page=1&page_size=20
+GET /api/execution/logs?status=failed&page=1&page_size=20
 ```
 
 **响应示例**:
@@ -600,7 +600,7 @@ GET /api/tasks/logs?status=failed&page=1&page_size=20
 
 ### 14. 获取执行日志详情
 
-**接口地址**: `GET /tasks/logs/{id}`
+**接口地址**: `GET /execution/logs/{id}`
 
 **描述**: 根据日志 ID 获取执行日志详细信息
 
@@ -613,7 +613,7 @@ GET /api/tasks/logs?status=failed&page=1&page_size=20
 **请求示例**:
 
 ```bash
-GET /api/tasks/logs/69b1121135cf369be666ca8b
+GET /api/execution/logs/69b1121135cf369be666ca8b
 ```
 
 **响应示例**:
@@ -634,6 +634,106 @@ GET /api/tasks/logs/69b1121135cf369be666ca8b
     "output_summary": "HTTP 500 Internal Server Error 失败",
     "error_message": "HTTP 错误: 500 Internal Server Error",
     "triggered_by": "scheduler"
+  },
+  "message": null
+}
+```
+
+---
+
+### 15. 获取分发日志列表
+
+**接口地址**: `GET /dispatch/logs`
+
+**描述**: 分页获取分发日志列表，支持按扫描时间范围、是否有错误等条件筛选
+
+**请求参数**:
+
+| 参数名     | 类型    | 必填 | 默认值 | 描述                         |
+| ---------- | ------- | ---- | ------ | ---------------------------- |
+| start_time | string  | 否   | -      | 扫描开始时间（ISO 8601格式） |
+| end_time   | string  | 否   | -      | 扫描结束时间（ISO 8601格式） |
+| has_error  | boolean | 否   | -      | 是否有错误                   |
+| page       | integer | 否   | 1      | 页码                         |
+| page_size  | integer | 否   | 20     | 每页数量                     |
+
+**请求示例**:
+
+```bash
+GET /api/dispatch/logs?has_error=false&page=1&page_size=20
+```
+
+**响应示例**:
+
+```json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "_id": "69b1121135cf369be666ca8c",
+        "scan_time": "2026-03-11T07:02:57.250Z",
+        "scan_window_start": "2026-03-11T07:02:47.250Z",
+        "scan_window_end": "2026-03-11T07:02:57.250Z",
+        "total_tasks": 5,
+        "enabled_tasks": 3,
+        "dispatched_instances": 8,
+        "error_message": null
+      },
+      {
+        "_id": "69b1121135cf369be666ca8d",
+        "scan_time": "2026-03-11T07:02:47.250Z",
+        "scan_window_start": "2026-03-11T07:02:37.250Z",
+        "scan_window_end": "2026-03-11T07:02:47.250Z",
+        "total_tasks": 5,
+        "enabled_tasks": 3,
+        "dispatched_instances": 8,
+        "error_message": "连接数据库失败"
+      }
+    ],
+    "total": 100,
+    "page": 1,
+    "page_size": 20,
+    "total_pages": 5
+  },
+  "message": null
+}
+```
+
+---
+
+### 16. 获取分发日志详情
+
+**接口地址**: `GET /dispatch/logs/{id}`
+
+**描述**: 根据日志 ID 获取分发日志详细信息
+
+**路径参数**:
+
+| 参数名 | 类型   | 必填 | 描述        |
+| ------ | ------ | ---- | ----------- |
+| id     | string | 是   | 分发日志 ID |
+
+**请求示例**:
+
+```bash
+GET /api/dispatch/logs/69b1121135cf369be666ca8c
+```
+
+**响应示例**:
+
+```json
+{
+  "success": true,
+  "data": {
+    "_id": "69b1121135cf369be666ca8c",
+    "scan_time": "2026-03-11T07:02:57.250Z",
+    "scan_window_start": "2026-03-11T07:02:47.250Z",
+    "scan_window_end": "2026-03-11T07:02:57.250Z",
+    "total_tasks": 5,
+    "enabled_tasks": 3,
+    "dispatched_instances": 8,
+    "error_message": null
   },
   "message": null
 }
@@ -672,6 +772,7 @@ GET /api/tasks/logs/69b1121135cf369be666ca8b
 | end_time       | string  | 结束执行时间                                         |
 | retry_count    | integer | 重试次数                                             |
 | result         | object  | 执行结果                                             |
+| triggered_by   | string  | 触发方式（scheduler/manual）                           |
 | created_at     | string  | 创建时间                                             |
 
 ### ExecutionResult（执行结果）
@@ -698,6 +799,19 @@ GET /api/tasks/logs/69b1121135cf369be666ca8b
 | output_summary | string  | 输出摘要                                             |
 | error_message  | string  | 错误消息                                             |
 | triggered_by   | string  | 触发方式（scheduler/manual）                         |
+
+### DispatchLog（分发日志）
+
+| 字段名               | 类型    | 描述             |
+| -------------------- | ------- | ---------------- |
+| _id                  | string  | 日志 ID          |
+| scan_time            | string  | 扫描时间         |
+| scan_window_start    | string  | 扫描窗口开始时间 |
+| scan_window_end      | string  | 扫描窗口结束时间 |
+| total_tasks          | integer | 总任务数         |
+| enabled_tasks        | integer | 启用的任务数     |
+| dispatched_instances | integer | 分发的实例数     |
+| error_message        | string  | 错误消息         |
 
 ---
 
