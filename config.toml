@@ -46,6 +46,14 @@ max_concurrent_tasks = 10
 # 调度日志保留天数
 log_retention_days = 30
 
+[dispatcher.scheduling]
+# 改进 EDF 优先级权重（Urgency + Aging - RetryPenalty）
+urgency_weight = 0.7
+aging_weight = 0.25
+retry_penalty_weight = 0.05
+# Aging 满分窗口（秒）
+aging_window_secs = 3600
+
 [retry]
 # 重试扫描间隔（秒）
 scan_interval_secs = 60

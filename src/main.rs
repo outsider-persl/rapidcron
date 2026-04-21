@@ -68,6 +68,7 @@ async fn main() -> Result<()> {
         Arc::clone(&task_queue),
         cfg.dispatcher.scan_interval_secs,
         cfg.dispatcher.log_retention_days,
+        cfg.dispatcher.scheduling.clone(),
     );
     dispatcher.start().await?;
     info!("[Main] task dispatcher started");

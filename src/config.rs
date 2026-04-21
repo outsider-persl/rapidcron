@@ -50,6 +50,27 @@ pub struct EtcdConfig {
 pub struct DispatcherConfig {
     pub scan_interval_secs: u64,
     pub log_retention_days: u32,
+    #[serde(default)]
+    pub scheduling: SchedulingPolicyConfig,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SchedulingPolicyConfig {
+    pub urgency_weight: f64,
+    pub aging_weight: f64,
+    pub retry_penalty_weight: f64,
+    pub aging_window_secs: u64,
+}
+
+impl Default for SchedulingPolicyConfig {
+    fn default() -> Self {
+        Self {
+            urgency_weight: 0.7,
+            aging_weight: 0.25,
+            retry_penalty_weight: 0.05,
+            aging_window_secs: 3600,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

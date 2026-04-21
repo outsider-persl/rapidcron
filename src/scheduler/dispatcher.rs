@@ -3,6 +3,7 @@ use crate::executor::TaskQueue;
 use crate::scheduler::cron_parser::CronParser;
 use crate::storage::mongo::MongoDataSource;
 use crate::types::{DispatchLog, Task, TaskInstance, TaskStatus};
+use crate::config::SchedulingPolicyConfig;
 use chrono::{DateTime, Utc};
 use mongodb::bson::{doc, oid::ObjectId};
 use std::collections::{HashMap, HashSet};
@@ -21,6 +22,15 @@ pub struct Dispatcher {
     last_scan_end_time: Arc<RwLock<DateTime<Utc>>>,
     scan_interval: Duration,
     log_retention_days: u32,
+    scheduling: SchedulingPolicyConfig,
+}
+
+#[derive(Debug, Clone)]
+struct DispatchCandidate {
+    task_id: ObjectId,
+    task_name: String,
+    scheduled_time: DateTime<Utc>,
+    score: f64,
 }
 
 impl Dispatcher {
@@ -29,6 +39,7 @@ impl Dispatcher {
         task_queue: Arc<TaskQueue>,
         scan_interval_secs: u64,
         log_retention_days: u32,
+        scheduling: SchedulingPolicyConfig,
     ) -> Self {
         Self {
             db,
@@ -37,6 +48,7 @@ impl Dispatcher {
             last_scan_end_time: Arc::new(RwLock::new(Utc::now())),
             scan_interval: Duration::from_secs(scan_interval_secs),
             log_retention_days,
+            scheduling,
         }
     }
 
@@ -82,6 +94,7 @@ impl Dispatcher {
         let running_flag_cleanup = Arc::clone(&self.running);
         let log_retention_days = self.log_retention_days;
         let last_scan_end_time = Arc::clone(&self.last_scan_end_time);
+        let scheduling = self.scheduling.clone();
 
         tokio::spawn(async move {
             let mut timer = tokio::time::interval(interval);
@@ -94,6 +107,7 @@ impl Dispatcher {
                     &task_queue,
                     scan_interval_secs,
                     &last_scan_end_time,
+                    &scheduling,
                 )
                 .await
                 {
@@ -154,6 +168,7 @@ impl Dispatcher {
         task_queue: &Arc<TaskQueue>,
         scan_interval_secs: u64,
         last_scan_end_time: &Arc<RwLock<DateTime<Utc>>>,
+        scheduling: &SchedulingPolicyConfig,
     ) -> Result<usize> {
         let now = Utc::now();
 
@@ -227,34 +242,84 @@ impl Dispatcher {
                 .insert(instance.scheduled_time.timestamp());
         }
 
-        let mut dispatched_count = 0;
+        let mut all_candidates: Vec<DispatchCandidate> = Vec::new();
 
-        for task in enabled_tasks {
+        for task in &enabled_tasks {
             if let Some(task_id) = task.id {
-                match Self::dispatch_task_instances(
-                    db,
-                    task_queue,
+                match Self::collect_task_candidates(
                     &task,
                     &now,
                     &scan_window_end,
                     existing_instances_map.get(&task_id),
+                    scheduling,
                 )
                 .await
                 {
-                    Ok(count) => {
-                        if count > 0 {
+                    Ok(candidates) => {
+                        if !candidates.is_empty() {
                             info!(
-                                "[Dispatcher] 任务 {} 创建并分发 {} 个实例",
-                                task.name, count
+                                "[Dispatcher] 任务 {} 生成 {} 个候选实例（待优先级排序）",
+                                task.name,
+                                candidates.len()
                             );
-                            dispatched_count += count;
                         }
+                        all_candidates.extend(candidates);
                     }
                     Err(e) => {
-                        error!("[Dispatcher] 分发任务 {} 失败: {}", task.name, e);
+                        error!("[Dispatcher] 处理任务 {} 失败: {}", task.name, e);
                     }
                 }
             }
+        }
+
+        // I-EDF: 先按分数降序，再按调度时间升序，最后按任务名稳定排序
+        all_candidates.sort_by(|a, b| {
+            b.score
+                .total_cmp(&a.score)
+                .then_with(|| a.scheduled_time.cmp(&b.scheduled_time))
+                .then_with(|| a.task_name.cmp(&b.task_name))
+        });
+
+        let mut dispatched_count = 0;
+        for candidate in all_candidates {
+            let instance = TaskInstance {
+                id: None,
+                task_id: candidate.task_id,
+                scheduled_time: candidate.scheduled_time,
+                status: TaskStatus::Pending,
+                executor_id: None,
+                start_time: None,
+                end_time: None,
+                retry_count: 0,
+                result: None,
+                triggered_by: crate::types::TriggeredBy::Scheduler,
+                created_at: now,
+            };
+
+            let instance_id = db
+                .create_task_instance(&instance)
+                .await
+                .map_err(|e| Error::Database(format!("创建任务实例失败: {}", e)))?;
+
+            let task_msg = crate::executor::TaskMessage {
+                instance_id,
+                task_id: candidate.task_id,
+                task_name: candidate.task_name.clone(),
+                scheduled_time: candidate.scheduled_time.timestamp(),
+                retry_count: 0,
+                triggered_by: crate::types::TriggeredBy::Scheduler,
+            };
+
+            task_queue
+                .publish_task(task_msg)
+                .await
+                .map_err(|e| Error::MessageQueue(format!("发布任务到队列失败: {}", e)))?;
+
+            debug!(
+                "分发任务 {} 实例 {}，计划执行时间: {}，score={:.4}",
+                candidate.task_name, instance_id, candidate.scheduled_time, candidate.score
+            );
+            dispatched_count += 1;
         }
 
         let dispatch_log = DispatchLog {
@@ -330,15 +395,14 @@ impl Dispatcher {
         Ok(())
     }
 
-    /// 为任务创建并分发实例
-    async fn dispatch_task_instances(
-        db: &Arc<MongoDataSource>,
-        task_queue: &Arc<TaskQueue>,
+    /// 为任务收集候选实例，不直接分发（用于全局优先级排序）
+    async fn collect_task_candidates(
         task: &Task,
         now: &DateTime<Utc>,
         scan_window_end: &DateTime<Utc>,
         existing_instances: Option<&std::collections::HashSet<i64>>,
-    ) -> Result<usize> {
+        scheduling: &SchedulingPolicyConfig,
+    ) -> Result<Vec<DispatchCandidate>> {
         let task_id = task
             .id
             .ok_or_else(|| Error::Validation("任务 ID 不能为空".to_string()))?;
@@ -348,14 +412,14 @@ impl Dispatcher {
         let next_triggers = cron_parser.next_triggers_in_window(*now, *scan_window_end);
 
         if next_triggers.is_empty() {
-            return Ok(0);
+            return Ok(Vec::new());
         }
 
         // 使用传入的已存在实例集合，避免重复查询数据库
         let empty_set = std::collections::HashSet::new();
         let existing_scheduled_times = existing_instances.unwrap_or(&empty_set);
 
-        let mut dispatched_count = 0;
+        let mut candidates = Vec::new();
 
         for scheduled_time in next_triggers {
             let scheduled_timestamp = scheduled_time.timestamp();
@@ -367,49 +431,36 @@ impl Dispatcher {
                 );
                 continue;
             }
-
-            let instance = TaskInstance {
-                id: None,
-                task_id,
-                scheduled_time,
-                status: TaskStatus::Pending,
-                executor_id: None,
-                start_time: None,
-                end_time: None,
-                retry_count: 0,
-                result: None,
-                triggered_by: crate::types::TriggeredBy::Scheduler,
-                created_at: *now,
-            };
-
-            let instance_id = db
-                .create_task_instance(&instance)
-                .await
-                .map_err(|e| Error::Database(format!("创建任务实例失败: {}", e)))?;
-
-            let task_msg = crate::executor::TaskMessage {
-                instance_id,
+            let score = Self::calculate_priority_score(task, now, &scheduled_time, scheduling);
+            candidates.push(DispatchCandidate {
                 task_id,
                 task_name: task.name.clone(),
-                scheduled_time: scheduled_timestamp,
-                retry_count: 0,
-                triggered_by: crate::types::TriggeredBy::Scheduler,
-            };
-
-            task_queue
-                .publish_task(task_msg)
-                .await
-                .map_err(|e| Error::MessageQueue(format!("发布任务到队列失败: {}", e)))?;
-
-            debug!(
-                "为任务 {} 创建实例 {}，计划执行时间: {}",
-                task.name, instance_id, scheduled_time
-            );
-
-            dispatched_count += 1;
+                scheduled_time,
+                score,
+            });
         }
 
-        Ok(dispatched_count)
+        Ok(candidates)
+    }
+
+    /// 改进 EDF 分数：Urgency + Aging - RetryPenalty
+    fn calculate_priority_score(
+        task: &Task,
+        now: &DateTime<Utc>,
+        scheduled_time: &DateTime<Utc>,
+        scheduling: &SchedulingPolicyConfig,
+    ) -> f64 {
+        let deadline_secs = (*scheduled_time - *now).num_seconds().max(0) as f64;
+        let urgency = 1.0 / (1.0 + deadline_secs);
+
+        let age_secs = (*now - task.created_at).num_seconds().max(0) as f64;
+        let aging_window = scheduling.aging_window_secs.max(1) as f64;
+        let aging = (age_secs / aging_window).min(1.0);
+
+        let retry_penalty = task.max_retries.unwrap_or(0).max(0) as f64 / 10.0;
+
+        scheduling.urgency_weight * urgency + scheduling.aging_weight * aging
+            - scheduling.retry_penalty_weight * retry_penalty
     }
 
     /// 清理旧日志

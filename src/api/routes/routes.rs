@@ -49,6 +49,7 @@ fn task_routes(state: ApiState) -> Router {
         .route("/instances", axum::routing::get(tasks::list_instances))
         .route("/instances/:id", axum::routing::get(tasks::get_instance))
         .route("/stats", axum::routing::get(tasks::get_stats))
+        .route("/test-data", axum::routing::post(tasks::create_test_tasks))
         .with_state(state)
 }
 

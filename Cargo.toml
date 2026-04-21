@@ -71,3 +71,20 @@ serde_with = "3.17.0"
 [dev-dependencies]
 # 测试时需要的依赖
 rapidcron = { path = "." }
+criterion = "0.5"
+
+[[bench]]
+name = "cron_parser_bench"
+harness = false
+
+[[bench]]
+name = "task_creation_bench"
+harness = false
+
+[[bench]]
+name = "task_query_bench"
+harness = false
+
+[[bench]]
+name = "retry_calculation_bench"
+harness = false

@@ -9,8 +9,8 @@ use crate::{
     error::Error,
     types::{
         ApiResponse, CreateTaskRequest, PaginatedResponse, StatsResponse, Task, TaskInstance,
-        TaskStatus, TriggerTaskRequest, TriggeredBy, UpdateTaskRequest, parse_object_id,
-        parse_object_ids,
+        TaskPayload, TaskStatus, TaskType, TriggerTaskRequest, TriggeredBy, UpdateTaskRequest,
+        parse_object_id, parse_object_ids,
     },
 };
 
@@ -33,6 +33,12 @@ pub struct InstanceListQuery {
     pub status: Option<String>,
     pub page: Option<String>,
     pub page_size: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct CreateTestTasksResponse {
+    pub created: Vec<Task>,
+    pub existed: Vec<Task>,
 }
 
 /// 获取任务列表
@@ -429,4 +435,167 @@ pub async fn get_stats(
     };
 
     Ok(Json(ApiResponse::success(stats)))
+}
+
+/// 创建测试数据任务（幂等）
+pub async fn create_test_tasks(
+    State(state): State<ApiState>,
+) -> Result<Json<ApiResponse<CreateTestTasksResponse>>, Error> {
+    let now = chrono::Utc::now();
+    let mut created = Vec::new();
+    let mut existed = Vec::new();
+
+    let task_specs = vec![
+        (
+            "demo-http-success-fast",
+            "演示任务：快速成功链路",
+            TaskType::Http,
+            "*/20 * * * * *",
+            Some("http://127.0.0.1:8081/execute"),
+            None,
+            true,
+            20,
+            1,
+        ),
+        (
+            "demo-http-error-retry",
+            "演示任务：失败与重试链路",
+            TaskType::Http,
+            "*/45 * * * * *",
+            Some("http://127.0.0.1:8081/error"),
+            None,
+            true,
+            20,
+            3,
+        ),
+        (
+            "demo-http-health-check",
+            "演示任务：执行器健康检查",
+            TaskType::Http,
+            "*/30 * * * * *",
+            Some("http://127.0.0.1:8081/health"),
+            None,
+            true,
+            15,
+            1,
+        ),
+        (
+            "demo-http-node-metrics",
+            "演示任务：节点资源采集",
+            TaskType::Http,
+            "*/40 * * * * *",
+            Some("http://127.0.0.1:8081/node"),
+            None,
+            true,
+            15,
+            2,
+        ),
+        (
+            "demo-cleanup-scheduler-logs",
+            "演示任务：每6小时清理 logs 目录30天前日志",
+            TaskType::Command,
+            "0 0 */6 * * *",
+            None,
+            Some(
+                "bash -lc 'mkdir -p logs && find logs -type f -name \"*.log\" -mtime +30 -delete'",
+            ),
+            true,
+            60,
+            2,
+        ),
+        (
+            "demo-export-dispatch-stats-hourly",
+            "演示任务：每小时整点导出分发统计到 logs",
+            TaskType::Command,
+            "0 0 * * * *",
+            None,
+            Some(
+                "bash -lc 'mkdir -p logs && NOW=\"$(date \"+%Y-%m-%d %H:%M:%S\")\" && TS=\"$(date \"+%Y-%m-%d-%H:%M:%S\")\" && OUT=\"logs/dispatch-stats-${TS}.log\" && TOTAL=\"$(ls -1 logs/*.log 2>/dev/null | wc -l | tr -d \" \")\" && RECENT=\"$(find logs -type f -name \"*.log\" -mtime -1 | wc -l | tr -d \" \")\" && OLD=\"$(find logs -type f -name \"*.log\" -mtime +30 | wc -l | tr -d \" \")\" && { echo \"dispatch_stats_time=${NOW}\"; echo \"total_log_files=${TOTAL}\"; echo \"recent_24h_log_files=${RECENT}\"; echo \"older_than_30d_log_files=${OLD}\"; } > \"${OUT}\"'",
+            ),
+            true,
+            60,
+            2,
+        ),
+        (
+            "demo-manual-only-task",
+            "演示任务：默认禁用，仅用于手动触发",
+            TaskType::Http,
+            "0 */10 * * * *",
+            Some("http://127.0.0.1:8081/execute"),
+            None,
+            false,
+            20,
+            0,
+        ),
+    ];
+
+    for (
+        name,
+        description,
+        task_type,
+        schedule,
+        url,
+        command,
+        enabled,
+        timeout_seconds,
+        max_retries,
+    ) in task_specs
+    {
+        let existing = state
+            .db
+            .find_tasks(
+                Some(doc! {
+                    "name": name,
+                    "deleted_at": null
+                }),
+                None,
+            )
+            .await?;
+
+        if let Some(task) = existing.into_iter().next() {
+            existed.push(task);
+            continue;
+        }
+
+        let task = Task {
+            id: None,
+            name: name.to_string(),
+            description: Some(description.to_string()),
+            dependency_ids: Vec::new(),
+            task_type: task_type.clone(),
+            schedule: schedule.to_string(),
+            enabled,
+            payload: match task_type {
+                TaskType::Http => TaskPayload::Http {
+                    url: url.unwrap_or_default().to_string(),
+                    method: Some("GET".to_string()),
+                    headers: None,
+                    body: None,
+                    timeout_seconds: Some(timeout_seconds),
+                },
+                TaskType::Command => TaskPayload::Command {
+                    command: command.unwrap_or_default().to_string(),
+                    timeout_seconds: Some(timeout_seconds),
+                },
+            },
+            timeout_seconds: Some(timeout_seconds),
+            max_retries: Some(max_retries),
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+        };
+
+        let task_id = state.db.create_task(&task).await?;
+        let inserted = state
+            .db
+            .get_task(task_id)
+            .await?
+            .ok_or_else(|| Error::Execution("测试任务创建后读取失败".to_string()))?;
+        created.push(inserted);
+    }
+
+    Ok(Json(ApiResponse::success(CreateTestTasksResponse {
+        created,
+        existed,
+    })))
 }
